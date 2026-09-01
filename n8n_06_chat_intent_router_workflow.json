@@ -183,27 +183,31 @@
       },
       {
         "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "routed_intent",
-                "type": "stringValue",
-                "stringValue": "HR_POLICY"
-              }
-            ]
+          "workflowId": {
+            "__rl": true,
+            "value": "hrHybridCagRagAnswer07",
+            "mode": "id"
           },
-          "include": "all",
-          "options": {}
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
         },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
         "position": [
           1300,
           -200
         ],
         "id": "b6666666-1111-4666-8666-666666666666",
-        "name": "HR Route Placeholder"
+        "name": "Execute Sub-Workflow HR Hybrid"
       },
       {
         "parameters": {
