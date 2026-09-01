@@ -1,0 +1,202 @@
+[
+  {
+    "id": "attendanceSyntheticDataLoad08",
+    "name": "08_Attendance_Synthetic_Data_Load",
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "d1111111-1111-4111-8111-111111111111",
+        "name": "Manual Trigger"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "CREATE SCHEMA IF NOT EXISTS attendance;\n\nCREATE TABLE IF NOT EXISTS attendance.employee (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    employee_no TEXT UNIQUE NOT NULL,\n    full_name TEXT NOT NULL,\n    department TEXT NOT NULL,\n    active BOOLEAN NOT NULL DEFAULT true,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT now()\n);\n\nCREATE TABLE IF NOT EXISTS attendance.shift (\n    id SERIAL PRIMARY KEY,\n    name TEXT NOT NULL UNIQUE,\n    start_time TIME NOT NULL,\n    end_time TIME NOT NULL,\n    grace_minutes INTEGER NOT NULL DEFAULT 15,\n    is_night_shift BOOLEAN NOT NULL DEFAULT false,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT now()\n);\n\nCREATE TABLE IF NOT EXISTS attendance.employee_shift (\n    id SERIAL PRIMARY KEY,\n    employee_id UUID NOT NULL REFERENCES attendance.employee(id) ON DELETE CASCADE,\n    shift_id INTEGER NOT NULL REFERENCES attendance.shift(id) ON DELETE CASCADE,\n    valid_from DATE NOT NULL,\n    valid_to DATE,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),\n    CONSTRAINT uq_employee_shift_period UNIQUE (employee_id, shift_id, valid_from)\n);\n\nCREATE TABLE IF NOT EXISTS attendance.calendar_day (\n    day DATE PRIMARY KEY,\n    is_workday BOOLEAN NOT NULL,\n    is_holiday BOOLEAN NOT NULL DEFAULT false,\n    description TEXT NOT NULL DEFAULT 'İş Günü'\n);\n\nCREATE TABLE IF NOT EXISTS attendance.exception (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    employee_id UUID NOT NULL REFERENCES attendance.employee(id) ON DELETE CASCADE,\n    start_at TIMESTAMPTZ NOT NULL,\n    end_at TIMESTAMPTZ NOT NULL,\n    exception_type TEXT NOT NULL,\n    approved BOOLEAN NOT NULL DEFAULT true,\n    reason TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),\n    CONSTRAINT uq_employee_exception UNIQUE (employee_id, start_at, end_at, exception_type)\n);\n\nCREATE TABLE IF NOT EXISTS attendance.event (\n    id BIGSERIAL PRIMARY KEY,\n    employee_id UUID NOT NULL REFERENCES attendance.employee(id) ON DELETE CASCADE,\n    event_time TIMESTAMPTZ NOT NULL,\n    event_type TEXT NOT NULL CHECK (event_type IN ('IN', 'OUT')),\n    source_device TEXT NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),\n    CONSTRAINT uq_attendance_event UNIQUE (employee_id, event_time, event_type)\n);\n\nCREATE INDEX IF NOT EXISTS idx_event_emp_time ON attendance.event (employee_id, event_time);\nCREATE INDEX IF NOT EXISTS idx_event_time ON attendance.event (event_time);",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          260,
+          0
+        ],
+        "id": "d2222222-2222-4222-8222-222222222222",
+        "name": "Create & Validate Schema",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "CREATE OR REPLACE VIEW attendance.daily_summary AS\nWITH base_days AS (\n    SELECT \n        c.day,\n        c.is_workday,\n        c.is_holiday,\n        c.description AS day_description,\n        e.id AS employee_id,\n        e.employee_no,\n        e.full_name,\n        e.department,\n        e.active AS employee_active,\n        COALESCE(s.name, 'Gündüz Standart') AS shift_name,\n        COALESCE(s.start_time, '08:30:00'::time) AS shift_start,\n        COALESCE(s.end_time, '17:30:00'::time) AS shift_end,\n        COALESCE(s.grace_minutes, 15) AS grace_minutes,\n        COALESCE(s.is_night_shift, false) AS is_night_shift\n    FROM attendance.calendar_day c\n    CROSS JOIN attendance.employee e\n    LEFT JOIN LATERAL (\n        SELECT es.shift_id, sh.name, sh.start_time, sh.end_time, sh.grace_minutes, sh.is_night_shift\n        FROM attendance.employee_shift es\n        JOIN attendance.shift sh ON es.shift_id = sh.id\n        WHERE es.employee_id = e.id\n          AND es.valid_from <= c.day\n          AND (es.valid_to IS NULL OR es.valid_to >= c.day)\n        ORDER BY es.valid_from DESC\n        LIMIT 1\n    ) s ON true\n    WHERE e.active = true\n),\nday_events AS (\n    SELECT \n        b.day,\n        b.employee_id,\n        MIN(CASE WHEN ev.event_type = 'IN' THEN ev.event_time END) AS first_in,\n        MAX(CASE WHEN ev.event_type = 'OUT' THEN ev.event_time END) AS last_out,\n        COUNT(ev.id) AS total_events,\n        COUNT(CASE WHEN ev.event_type = 'IN' THEN 1 END) AS in_count,\n        COUNT(CASE WHEN ev.event_type = 'OUT' THEN 1 END) AS out_count,\n        MAX(ev.source_device) AS last_device\n    FROM base_days b\n    LEFT JOIN attendance.event ev ON ev.employee_id = b.employee_id\n      AND ev.event_time >= (\n          CASE \n              WHEN b.is_night_shift THEN (b.day::text || ' 18:00:00 Europe/Istanbul')::timestamptz\n              ELSE (b.day::text || ' 00:00:00 Europe/Istanbul')::timestamptz\n          END\n      )\n      AND ev.event_time < (\n          CASE \n              WHEN b.is_night_shift THEN ((b.day + INTERVAL '1 day')::date::text || ' 12:00:00 Europe/Istanbul')::timestamptz\n              ELSE ((b.day + INTERVAL '1 day')::date::text || ' 04:00:00 Europe/Istanbul')::timestamptz\n          END\n      )\n    GROUP BY b.day, b.employee_id\n),\nday_exceptions AS (\n    SELECT \n        b.day,\n        b.employee_id,\n        bool_or(ex.approved) AS has_approved_exception,\n        STRING_AGG(DISTINCT ex.exception_type, ', ') AS exception_types\n    FROM base_days b\n    LEFT JOIN attendance.exception ex ON ex.employee_id = b.employee_id\n      AND ex.approved = true\n      AND ex.start_at <= (b.day::text || ' 23:59:59 Europe/Istanbul')::timestamptz\n      AND ex.end_at >= (b.day::text || ' 00:00:00 Europe/Istanbul')::timestamptz\n    GROUP BY b.day, b.employee_id\n)\nSELECT \n    b.day,\n    b.employee_id,\n    b.employee_no,\n    b.full_name,\n    b.department,\n    b.shift_name,\n    b.shift_start,\n    b.shift_end,\n    b.grace_minutes,\n    b.is_night_shift,\n    b.is_workday,\n    b.is_holiday,\n    b.day_description,\n    e.first_in,\n    e.last_out,\n    COALESCE(e.total_events, 0) AS total_events,\n    COALESCE(x.has_approved_exception, false) AS has_approved_exception,\n    x.exception_types,\n    CASE \n        WHEN e.first_in IS NOT NULL AND e.last_out IS NOT NULL AND e.last_out >= e.first_in THEN\n            ROUND(EXTRACT(EPOCH FROM (e.last_out - e.first_in)) / 60)::integer\n        ELSE 0\n    END AS worked_minutes,\n    CASE \n        WHEN NOT b.is_workday OR b.is_holiday OR COALESCE(x.has_approved_exception, false) THEN 0\n        WHEN e.first_in IS NULL THEN 0\n        ELSE\n            GREATEST(\n                0,\n                ROUND(\n                    EXTRACT(EPOCH FROM (\n                        e.first_in - \n                        ((b.day::text || ' ' || b.shift_start::text || ' Europe/Istanbul')::timestamptz + (b.grace_minutes || ' minutes')::interval)\n                    )) / 60\n                )::integer\n            )\n    END AS late_minutes,\n    CASE \n        WHEN NOT b.is_workday OR b.is_holiday OR COALESCE(x.has_approved_exception, false) THEN 0\n        WHEN e.last_out IS NULL THEN 0\n        ELSE\n            GREATEST(\n                0,\n                ROUND(\n                    EXTRACT(EPOCH FROM (\n                        (b.day::text || ' ' || b.shift_end::text || ' Europe/Istanbul')::timestamptz - e.last_out\n                    )) / 60\n                )::integer\n            )\n    END AS early_exit_minutes,\n    CASE \n        WHEN e.first_in IS NOT NULL AND e.last_out IS NULL THEN true\n        ELSE false\n    END AS missing_checkout,\n    CASE \n        WHEN b.is_holiday THEN 'HOLIDAY'\n        WHEN NOT b.is_workday THEN 'WEEKEND'\n        WHEN COALESCE(x.has_approved_exception, false) THEN \n            CASE \n                WHEN x.exception_types ILIKE '%REMOTE%' THEN 'REMOTE'\n                ELSE 'ON_LEAVE'\n            END\n        WHEN e.first_in IS NULL THEN 'ABSENT'\n        WHEN e.first_in IS NOT NULL AND e.last_out IS NULL THEN 'MISSING_CHECKOUT'\n        WHEN (\n            EXTRACT(EPOCH FROM (\n                e.first_in - \n                ((b.day::text || ' ' || b.shift_start::text || ' Europe/Istanbul')::timestamptz + (b.grace_minutes || ' minutes')::interval)\n            )) / 60\n        ) > 0 THEN 'LATE'\n        ELSE 'ON_TIME'\n    END AS status\nFROM base_days b\nLEFT JOIN day_events e ON b.day = e.day AND b.employee_id = e.employee_id\nLEFT JOIN day_exceptions x ON b.day = x.day AND b.employee_id = x.employee_id;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          520,
+          0
+        ],
+        "id": "d3333333-3333-4333-8333-333333333333",
+        "name": "Create or Refresh Daily Summary View",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT \n  (SELECT COUNT(*) FROM attendance.employee) AS employee_count,\n  (SELECT COUNT(*) FROM attendance.shift) AS shift_count,\n  (SELECT COUNT(*) FROM attendance.calendar_day) AS calendar_days,\n  (SELECT COUNT(*) FROM attendance.exception) AS exception_count,\n  (SELECT COUNT(*) FROM attendance.event) AS total_events,\n  (SELECT COUNT(*) FROM attendance.daily_summary) AS daily_summary_rows,\n  (SELECT COUNT(*) FROM attendance.daily_summary WHERE status = 'LATE') AS late_count,\n  (SELECT COUNT(*) FROM attendance.daily_summary WHERE status = 'ON_LEAVE') AS on_leave_count,\n  (SELECT COUNT(*) FROM attendance.daily_summary WHERE status = 'REMOTE') AS remote_count,\n  (SELECT COUNT(*) FROM attendance.daily_summary WHERE status = 'ABSENT') AS absent_count,\n  (SELECT COUNT(*) FROM attendance.daily_summary WHERE status = 'ON_TIME') AS on_time_count,\n  (SELECT COUNT(*) FROM attendance.daily_summary WHERE missing_checkout = true) AS missing_checkout_count;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          780,
+          0
+        ],
+        "id": "d4444444-4444-4444-8444-444444444444",
+        "name": "Fetch Attendance Summary Stats",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "status",
+                "type": "stringValue",
+                "stringValue": "SUCCESS"
+              },
+              {
+                "name": "employee_count",
+                "type": "numberValue",
+                "numberValue": "={{ $json.employee_count }}"
+              },
+              {
+                "name": "calendar_days",
+                "type": "numberValue",
+                "numberValue": "={{ $json.calendar_days }}"
+              },
+              {
+                "name": "total_events",
+                "type": "numberValue",
+                "numberValue": "={{ $json.total_events }}"
+              },
+              {
+                "name": "daily_summary_rows",
+                "type": "numberValue",
+                "numberValue": "={{ $json.daily_summary_rows }}"
+              },
+              {
+                "name": "late_records",
+                "type": "numberValue",
+                "numberValue": "={{ $json.late_count }}"
+              },
+              {
+                "name": "on_leave_records",
+                "type": "numberValue",
+                "numberValue": "={{ $json.on_leave_count }}"
+              },
+              {
+                "name": "remote_records",
+                "type": "numberValue",
+                "numberValue": "={{ $json.remote_count }}"
+              },
+              {
+                "name": "date_range",
+                "type": "stringValue",
+                "stringValue": "2026-01-01 / 2026-03-01 (60 Gün)"
+              },
+              {
+                "name": "timezone",
+                "type": "stringValue",
+                "stringValue": "Europe/Istanbul (UTC+3)"
+              }
+            ]
+          },
+          "include": "none",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1040,
+          0
+        ],
+        "id": "d5555555-5555-4555-8555-555555555555",
+        "name": "Format Load Result"
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Create & Validate Schema",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create & Validate Schema": {
+        "main": [
+          [
+            {
+              "node": "Create or Refresh Daily Summary View",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create or Refresh Daily Summary View": {
+        "main": [
+          [
+            {
+              "node": "Fetch Attendance Summary Stats",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Attendance Summary Stats": {
+        "main": [
+          [
+            {
+              "node": "Format Load Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]
