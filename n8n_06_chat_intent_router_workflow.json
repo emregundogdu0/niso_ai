@@ -1,0 +1,522 @@
+[
+  {
+    "id": "chatIntentRouter06",
+    "name": "06_Chat_Intent_Router",
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "options": {
+            "title": "Yönetim Bilgi Asistanı",
+            "subtitle": "İK Politikaları, Devam Takibi ve Proje İletişimi",
+            "initialMessages": "Merhaba! Ben Yönetim Bilgi Asistanınız. Şirket İK politikaları, çalışan devam/devamsızlık durumu ve proje yazışmaları konusunda size yardımcı olabilirim. Nasıl yardımcı olabilirim?",
+            "starterPrompts": [
+              "Yıllık izin hakkım ne zaman başlar?",
+              "Bugün kimler geç kaldı?",
+              "TEMSA projesinde son durum nedir?",
+              "TEMSA ekibi bugün geç kaldı mı ve proje durumu nedir?"
+            ],
+            "allowFileUploads": false
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "b1111111-1111-4111-8111-111111111111",
+        "name": "Chat Trigger",
+        "webhookId": "management-ai-chat-intent-router"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const item = $input.first()?.json || {};\nconst rawMessage = String(item.chatInput || item.message || item.text || '').trim();\nconst sessionId = String(item.sessionId || 'session_' + Date.now());\nconst startTime = Date.now();\n\nif (rawMessage.length === 0) {\n  return [{\n    json: {\n      passed: false,\n      reason: 'EMPTY_INPUT',\n      session_id: sessionId,\n      question: '',\n      intent: 'UNKNOWN',\n      confidence: 0.0,\n      status: 'GUARD_REJECTED',\n      response_text: 'Lütfen bir soru veya mesaj yazınız.',\n      start_time: startTime,\n      needs_fresh_data: false,\n      entities: {},\n      injection_suspected: false\n    }\n  }];\n}\n\nif (rawMessage.length > 2000) {\n  return [{\n    json: {\n      passed: false,\n      reason: 'EXCESSIVE_LENGTH',\n      session_id: sessionId,\n      question: rawMessage.substring(0, 2000),\n      intent: 'UNKNOWN',\n      confidence: 0.0,\n      status: 'GUARD_REJECTED',\n      response_text: 'Mesajınız çok uzun. Lütfen sorunuzu 2000 karakterden kısa olacak şekilde iletiniz.',\n      start_time: startTime,\n      needs_fresh_data: false,\n      entities: {},\n      injection_suspected: false\n    }\n  }];\n}\n\nconst injectionPatterns = [\n  /ignore (all )?previous instructions/i,\n  /system prompt/i,\n  /jailbreak/i,\n  /dan mode/i,\n  /drop table/i,\n  /eval\\(/i,\n  /exec\\(/i\n];\nconst injectionSuspected = injectionPatterns.some(p => p.test(rawMessage));\n\nreturn [{\n  json: {\n    passed: true,\n    session_id: sessionId,\n    question: rawMessage,\n    start_time: startTime,\n    injection_suspected: injectionSuspected\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "id": "b2222222-2222-4222-8222-222222222222",
+        "name": "Input Normalization & Guard"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:11434/api/chat",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Sen bir Yönetim ve İK Bilgi Asistanı Niyet Sınıflandırıcısısın (Intent Router).\\nGörevin kullanıcı sorusunu 5 niyetten birine sınıflandırmak ve JSON döndürmektir:\\n\\nINTENTLER:\\n1. HR_POLICY: İK politikaları, izinler, mesai/çalışma saatleri kuralları, dress code, yan haklar, bordro, İSG, istifa ve etik kurallar.\\n2. ATTENDANCE_SQL: Fiili giriş-çıkış saatleri, geç kalma, bugün kimler geldi/gelmedi, devamsızlık listesi, yoklama, turnike kayıtları, mesai çizelgesi.\\n3. PROJECT_MAIL: Proje durumu, teslimat takvimi, paydaş/müşteri e-posta yazışmaları, toplantı notları, proje e-postaları.\\n4. HYBRID: Birden fazla alanı birleştiren karmaşık sorular (ör. devam durumu + proje maili, veya İK kuralı + proje durumu).\\n5. UNKNOWN: Şirket yönetimi, İK, devam veya proje dışındaki konular (selamlaşma, şiir yazma, hava durumu, genel bilgi, felsefe, kod yazma vb.).\\n\\nSADECE aşağıdaki JSON formatında geçerli bir JSON döndür:\\n{\\n  \\\"intent\\\": \\\"HR_POLICY\\\" | \\\"ATTENDANCE_SQL\\\" | \\\"PROJECT_MAIL\\\" | \\\"HYBRID\\\" | \\\"UNKNOWN\\\",\\n  \\\"confidence\\\": 0.95,\\n  \\\"normalized_question\\\": \\\"...\\\",\\n  \\\"entities\\\": {\\n    \\\"date_range\\\": null,\\n    \\\"employee\\\": null,\\n    \\\"department\\\": null,\\n    \\\"project\\\": null\\n  },\\n  \\\"needs_fresh_data\\\": true | false,\\n  \\\"reason\\\": \\\"Sınıflandırma gerekçesi\\\"\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": $json.question\n    }\n  ],\n  \"stream\": false,\n  \"format\": \"json\",\n  \"options\": {\n    \"temperature\": 0.0\n  }\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          520,
+          0
+        ],
+        "id": "b3333333-3333-4333-8333-333333333333",
+        "name": "Qwen3.5-9B Intent Classifier"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const guard = $('Input Normalization & Guard').first().json;\n\nif (!guard.passed) {\n  return [{\n    json: {\n      session_id: guard.session_id,\n      question: guard.question,\n      intent: 'UNKNOWN',\n      confidence: 0.0,\n      status: 'GUARD_REJECTED',\n      response_text: guard.response_text,\n      latency_ms: Date.now() - guard.start_time,\n      metadata: { rejection_reason: guard.reason }\n    }\n  }];\n}\n\nconst httpResponse = $input.first().json;\nconst rawContent = httpResponse.message?.content || httpResponse.response || '';\n\nlet parsed = null;\ntry {\n  let clean = rawContent.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();\n  clean = clean.replace(/^```json\\s*/i, '').replace(/^```\\s*/, '').replace(/```\\s*$/, '').trim();\n  const firstB = clean.indexOf('{');\n  const lastB = clean.lastIndexOf('}');\n  if (firstB !== -1 && lastB !== -1 && lastB > firstB) {\n    clean = clean.substring(firstB, lastB + 1);\n  }\n  parsed = JSON.parse(clean);\n} catch (e) {\n  parsed = {\n    intent: 'UNKNOWN',\n    confidence: 0.0,\n    normalized_question: guard.question,\n    entities: {},\n    needs_fresh_data: false,\n    reason: 'JSON parse error: ' + e.message\n  };\n}\n\nconst validIntents = ['HR_POLICY', 'ATTENDANCE_SQL', 'PROJECT_MAIL', 'HYBRID', 'UNKNOWN'];\nlet intent = validIntents.includes(parsed.intent) ? parsed.intent : 'UNKNOWN';\nlet confidence = typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0.5;\nlet status = 'SUCCESS';\nlet responseText = '';\n\nif (confidence < 0.75 && intent !== 'UNKNOWN') {\n  status = 'LOW_CONFIDENCE';\n  intent = 'UNKNOWN';\n  responseText = `Sorunuz tam anlaşılamadı (Güven: %${Math.round(confidence * 100)}). Lütfen şirket politikaları, devam durumu veya proje yazışmalarıyla ilgili daha net bir soru belirtiniz.`;\n} else {\n  switch (intent) {\n    case 'HR_POLICY':\n      responseText = 'HR route selected (İK RAG ve CAG modülleri sonraki aşamada bağlanacak).';\n      break;\n    case 'ATTENDANCE_SQL':\n      responseText = 'ATTENDANCE_SQL route selected (Devam takip SQL modülü sonraki aşamada bağlanacak).';\n      break;\n    case 'PROJECT_MAIL':\n      responseText = 'PROJECT_MAIL route selected (Proje e-posta aracı sonraki aşamada bağlanacak).';\n      break;\n    case 'HYBRID':\n      responseText = 'HYBRID route selected (Hibrit yönetim modülü sonraki aşamada bağlanacak).';\n      break;\n    case 'UNKNOWN':\n    default:\n      responseText = 'UNKNOWN route selected (Sorunuz şirket politikaları, devam durumu veya proje yazışmaları kapsamı dışındadır).';\n      break;\n  }\n}\n\nconst latencyMs = Date.now() - guard.start_time;\n\nreturn [{\n  json: {\n    session_id: guard.session_id,\n    question: guard.question,\n    intent,\n    confidence,\n    status,\n    normalized_question: parsed.normalized_question || guard.question,\n    entities: parsed.entities || {},\n    needs_fresh_data: Boolean(parsed.needs_fresh_data),\n    reason: parsed.reason || '',\n    response_text: responseText,\n    latency_ms: latencyMs,\n    metadata: {\n      entities: parsed.entities || {},\n      needs_fresh_data: Boolean(parsed.needs_fresh_data),\n      reason: parsed.reason || '',\n      injection_suspected: guard.injection_suspected || false,\n      model: 'qwen3.5:9b'\n    }\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          0
+        ],
+        "id": "b4444444-4444-4444-8444-444444444444",
+        "name": "Structured Output & Confidence Check"
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.intent }}",
+                      "rightValue": "HR_POLICY",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.intent }}",
+                      "rightValue": "ATTENDANCE_SQL",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.intent }}",
+                      "rightValue": "PROJECT_MAIL",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.intent }}",
+                      "rightValue": "HYBRID",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              }
+            ]
+          },
+          "options": {
+            "fallbackOutput": "extra"
+          }
+        },
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          1040,
+          0
+        ],
+        "id": "b5555555-5555-4555-8555-555555555555",
+        "name": "Switch Intent Route"
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "routed_intent",
+                "type": "stringValue",
+                "stringValue": "HR_POLICY"
+              }
+            ]
+          },
+          "include": "all",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1300,
+          -200
+        ],
+        "id": "b6666666-1111-4666-8666-666666666666",
+        "name": "HR Route Placeholder"
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "routed_intent",
+                "type": "stringValue",
+                "stringValue": "ATTENDANCE_SQL"
+              }
+            ]
+          },
+          "include": "all",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1300,
+          -100
+        ],
+        "id": "b6666666-2222-4666-8666-666666666666",
+        "name": "Attendance SQL Placeholder"
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "routed_intent",
+                "type": "stringValue",
+                "stringValue": "PROJECT_MAIL"
+              }
+            ]
+          },
+          "include": "all",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1300,
+          0
+        ],
+        "id": "b6666666-3333-4666-8666-666666666666",
+        "name": "Project Mail Placeholder"
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "routed_intent",
+                "type": "stringValue",
+                "stringValue": "HYBRID"
+              }
+            ]
+          },
+          "include": "all",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1300,
+          100
+        ],
+        "id": "b6666666-4444-4666-8666-666666666666",
+        "name": "Hybrid Placeholder"
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "routed_intent",
+                "type": "stringValue",
+                "stringValue": "UNKNOWN"
+              }
+            ]
+          },
+          "include": "all",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1300,
+          200
+        ],
+        "id": "b6666666-5555-4666-8666-666666666666",
+        "name": "Unknown / Fallback Placeholder"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO audit.chat_request (\n  request_id, session_id, question, intent,\n  confidence, status, latency_ms, metadata, created_at\n) VALUES (\n  gen_random_uuid(),\n  $1::text,\n  $2::text,\n  $3::text,\n  $4::numeric,\n  $5::text,\n  $6::int,\n  $7::jsonb,\n  now()\n)\nRETURNING request_id, created_at;",
+          "options": {
+            "queryReplacement": "={{ [ $json.session_id, $json.question, $json.intent, $json.confidence, $json.status, $json.latency_ms, JSON.stringify($json.metadata) ] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          1580,
+          0
+        ],
+        "id": "b7777777-7777-4777-8777-777777777777",
+        "name": "Audit Log to Postgres",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "response",
+                "type": "stringValue",
+                "stringValue": "={{ $('Structured Output & Confidence Check').item.json.response_text }}"
+              },
+              {
+                "name": "intent",
+                "type": "stringValue",
+                "stringValue": "={{ $('Structured Output & Confidence Check').item.json.intent }}"
+              },
+              {
+                "name": "confidence",
+                "type": "numberValue",
+                "numberValue": "={{ $('Structured Output & Confidence Check').item.json.confidence }}"
+              },
+              {
+                "name": "session_id",
+                "type": "stringValue",
+                "stringValue": "={{ $('Structured Output & Confidence Check').item.json.session_id }}"
+              }
+            ]
+          },
+          "include": "none",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1840,
+          0
+        ],
+        "id": "b8888888-8888-4888-8888-888888888888",
+        "name": "Respond to User"
+      }
+    ],
+    "connections": {
+      "Chat Trigger": {
+        "main": [
+          [
+            {
+              "node": "Input Normalization & Guard",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Input Normalization & Guard": {
+        "main": [
+          [
+            {
+              "node": "Qwen3.5-9B Intent Classifier",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Qwen3.5-9B Intent Classifier": {
+        "main": [
+          [
+            {
+              "node": "Structured Output & Confidence Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Structured Output & Confidence Check": {
+        "main": [
+          [
+            {
+              "node": "Switch Intent Route",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Switch Intent Route": {
+        "main": [
+          [
+            {
+              "node": "HR Route Placeholder",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Attendance SQL Placeholder",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Project Mail Placeholder",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Hybrid Placeholder",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Unknown / Fallback Placeholder",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HR Route Placeholder": {
+        "main": [
+          [
+            {
+              "node": "Audit Log to Postgres",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Attendance SQL Placeholder": {
+        "main": [
+          [
+            {
+              "node": "Audit Log to Postgres",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Project Mail Placeholder": {
+        "main": [
+          [
+            {
+              "node": "Audit Log to Postgres",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Hybrid Placeholder": {
+        "main": [
+          [
+            {
+              "node": "Audit Log to Postgres",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Unknown / Fallback Placeholder": {
+        "main": [
+          [
+            {
+              "node": "Audit Log to Postgres",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Audit Log to Postgres": {
+        "main": [
+          [
+            {
+              "node": "Respond to User",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]
