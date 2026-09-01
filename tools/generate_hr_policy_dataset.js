@@ -110,7 +110,7 @@ const categories = [
     section: 'Bölüm 8 - Ücret ve Ödemeler',
     items: [
       ['Maaş ödemesi ne zaman yapılır?', 'Demo politikada maaş ödemesi ayın son iş günü yapılır. Banka veya tatil kaynaklı teknik gecikmeler İK ve finans tarafından duyurulur.'],
-      ['Prim ödemeleri nasıl belirlenir?', 'Sentetik örnekte primler şirket, ekip ve bireysel hedef gerçekleşmelerine göre dönemsel olarak değerlendirilir. Prim hakkı ve tutarı gerçek şirket politikası olarak yorumlanmamalıdır.'],
+      ['Prim sistemi var mı?', 'Sentetik şirket politikasında performans ve hedef gerçekleşmelerine bağlı prim veya bonus sistemi mevcuttur. Prim ödemeleri dönemsel olarak şirket ve bireysel hedeflere göre belirlenir.'],
       ['Avans talebi nasıl yapılır?', 'Demo süreçte avans talebi çalışan tarafından sistemden girilir ve net aylık ücretin yüzde 30’unu aşmayacak şekilde değerlendirilir. Finans onayı gereklidir.'],
       ['Maaş bordrosu nereden alınır?', 'Sentetik politikada bordro belgeleri güvenli çalışan portalından erişilebilir kabul edilmiştir. Erişim sorunu yaşayan çalışan İK destek kanalına başvurur.'],
       ['Ücret bilgisi kimlerle paylaşılabilir?', 'Demo kuralda ücret bilgisi kişisel ve gizli kabul edilir. Çalışan kendi bilgisini paylaşma hakkına sahip olmakla birlikte şirket içi erişim yetki esasına göre sınırlandırılır.'],
@@ -215,11 +215,16 @@ const categories = [
 
 function paraphrases(question, category) {
   const plain = question.replace(/\?$/, '');
-  return [
+  const list = [
     `${plain} hakkında bilgi verir misin?`,
     `${category} kapsamında ${plain.toLocaleLowerCase('tr-TR')}?`,
     `${plain} kuralı nasıl uygulanıyor?`
   ];
+  if (plain.toLowerCase().includes('prim')) {
+    list.push(`Şirkette prim veya bonus sistemi var mı?`);
+    list.push(`Bonus ödemeleri ve prim nasıl belirlenir?`);
+  }
+  return list;
 }
 
 function conditions(category) {
