@@ -1,0 +1,73 @@
+{
+  "name": "10B_Outlook_Mail_Source",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "fetchOnlyUnread": true
+        }
+      },
+      "id": "outlook-trigger",
+      "name": "Microsoft Outlook Trigger (Inactive Placeholder)",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "notes": "MANUEL KURULUM REHBERİ:\n1. Azure Entra ID üzerinden 'Mail.Read' yetkisine sahip bir App Registration oluşturun.\n2. n8n Credentials alanına 'Outlook Company Bot' adıyla OAuth 2.0 credential'ını kaydedin.\n3. Bu trigger düğümünde şirket bot e-posta adresini seçin.\n4. Workflow'u 'Active' duruma getirin.\n(Ortak işleme hattında ve veritabanında hiçbir değişiklik gerekmeyecektir)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\n// Transform Microsoft Outlook / Graph API raw response to Common Mail Message Schema\nconst commonMessage = {\n  provider: 'OUTLOOK',\n  mailbox_address: item.parentFolderId || 'OUTLOOK_BOT_EMAIL_ADDRESS',\n  provider_message_id: item.id,\n  provider_thread_id: item.conversationId,\n  internet_message_id: item.internetMessageId,\n  from_address: item.from?.emailAddress?.address || '',\n  from_name: item.from?.emailAddress?.name || '',\n  to_addresses: (item.toRecipients || []).map(r => r.emailAddress?.address).filter(Boolean),\n  cc_addresses: (item.ccRecipients || []).map(r => r.emailAddress?.address).filter(Boolean),\n  bcc_visible: false,\n  reply_to_address: item.replyTo?.[0]?.emailAddress?.address || null,\n  subject: item.subject || '(Başlıksız E-posta)',\n  received_at: item.receivedDateTime ? new Date(item.receivedDateTime).toISOString() : new Date().toISOString(),\n  sent_at: item.sentDateTime ? new Date(item.sentDateTime).toISOString() : new Date().toISOString(),\n  in_reply_to: item.inReplyTo || null,\n  references: null,\n  labels_or_categories: item.categories || [],\n  plain_text_body: item.bodyPreview || '',\n  html_body: item.body?.contentType === 'html' ? item.body?.content : '',\n  attachment_metadata: (item.attachments || []).map(att => ({\n    filename: att.name,\n    mime_type: att.contentType,\n    size: att.size,\n    attachment_id: att.id\n  })),\n  raw_metadata: {\n    importance: item.importance,\n    is_read: item.isRead\n  },\n  source_trigger: 'MICROSOFT_GRAPH_POLLING',\n  ingested_at: new Date().toISOString()\n};\n\nreturn [{ json: commonMessage }];"
+      },
+      "id": "transform-outlook-to-common-schema",
+      "name": "Transform Outlook to Common Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "workflowId": "commonMailIngestion10C"
+      },
+      "id": "send-to-common-ingestion",
+      "name": "Send to 10C Common Ingestion Pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Microsoft Outlook Trigger (Inactive Placeholder)": {
+      "main": [
+        [
+          {
+            "node": "Transform Outlook to Common Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Outlook to Common Schema": {
+      "main": [
+        [
+          {
+            "node": "Send to 10C Common Ingestion Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

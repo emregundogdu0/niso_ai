@@ -1,0 +1,78 @@
+{
+  "name": "10A_Gmail_Mail_Source",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "-in:trash -in:spam"
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger (eldornisoai@gmail.com)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Gmail Eldor Niso AI",
+          "name": "Gmail Eldor Niso AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\n// Transform Gmail raw response to Common Mail Message Schema\nconst headers = item.payload?.headers || [];\nfunction getHeader(name) {\n  const h = headers.find(x => x.name.toLowerCase() === name.toLowerCase());\n  return h ? h.value : null;\n}\n\nconst fromHeader = getHeader('From') || item.from || '';\nconst toHeader = getHeader('To') || item.to || '';\nconst ccHeader = getHeader('Cc') || item.cc || '';\nconst subject = getHeader('Subject') || item.snippet || '(Başlıksız E-posta)';\nconst dateHeader = getHeader('Date') || item.internalDate;\nconst messageIdHeader = getHeader('Message-ID') || getHeader('Message-Id');\n\nconst commonMessage = {\n  provider: 'GMAIL',\n  mailbox_address: 'eldornisoai@gmail.com',\n  provider_message_id: item.id,\n  provider_thread_id: item.threadId,\n  internet_message_id: messageIdHeader,\n  from_address: fromHeader,\n  from_name: fromHeader.split('<')[0].trim().replace(/\"/g, ''),\n  to_addresses: toHeader ? toHeader.split(',').map(s => s.trim()) : [],\n  cc_addresses: ccHeader ? ccHeader.split(',').map(s => s.trim()) : [],\n  bcc_visible: false,\n  reply_to_address: getHeader('Reply-To'),\n  subject: subject,\n  received_at: dateHeader ? new Date(dateHeader).toISOString() : new Date().toISOString(),\n  sent_at: dateHeader ? new Date(dateHeader).toISOString() : new Date().toISOString(),\n  in_reply_to: getHeader('In-Reply-To'),\n  references: getHeader('References'),\n  labels_or_categories: item.labelIds || [],\n  plain_text_body: item.snippet || '',\n  html_body: item.html || '',\n  attachment_metadata: (item.attachments || []).map(att => ({\n    filename: att.filename,\n    mime_type: att.mimeType,\n    size: att.size,\n    attachment_id: att.attachmentId\n  })),\n  raw_metadata: {\n    history_id: item.historyId,\n    size_estimate: item.sizeEstimate\n  },\n  source_trigger: 'GMAIL_POLLING',\n  ingested_at: new Date().toISOString()\n};\n\nreturn [{ json: commonMessage }];"
+      },
+      "id": "transform-to-common-schema",
+      "name": "Transform to Common Mail Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "workflowId": "commonMailIngestion10C"
+      },
+      "id": "execute-common-ingestion",
+      "name": "Send to 10C Common Ingestion Pipeline",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger (eldornisoai@gmail.com)": {
+      "main": [
+        [
+          {
+            "node": "Transform to Common Mail Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform to Common Mail Schema": {
+      "main": [
+        [
+          {
+            "node": "Send to 10C Common Ingestion Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
