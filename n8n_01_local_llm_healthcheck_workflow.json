@@ -1,0 +1,183 @@
+[
+  {
+    "id": "localLlmHealthcheck01",
+    "name": "01_Local_LLM_Healthcheck",
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "0c4479c8-0c6e-4c44-a88c-6d7c413ea3b1",
+        "name": "Manual Trigger"
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "prompt",
+                "type": "stringValue",
+                "stringValue": "Türkçe cevap ver. Kendini tek cümlede tanıt ve 7 ile 8’in toplamını söyle."
+              }
+            ]
+          },
+          "include": "none",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          240,
+          0
+        ],
+        "id": "48ab67cf-5ecf-4362-a954-f5278995bcf4",
+        "name": "Edit Fields/Test Prompt"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "={{ $json.prompt }}",
+          "hasOutputParser": false,
+          "needsFallback": false
+        },
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.9,
+        "position": [
+          480,
+          0
+        ],
+        "id": "9751b814-7607-4ed4-9c6d-65d8dfdfbc42",
+        "name": "Basic LLM Chain"
+      },
+      {
+        "parameters": {
+          "model": "qwen3.5:9b",
+          "options": {
+            "temperature": 0.1,
+            "think": false,
+            "format": "default"
+          }
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+        "typeVersion": 1,
+        "position": [
+          480,
+          220
+        ],
+        "id": "d9334886-f137-464d-b2c8-ac54f5f3fd78",
+        "name": "Ollama Chat Model",
+        "credentials": {
+          "ollamaApi": {
+            "id": "ollamaLocalCredential01",
+            "name": "Ollama Local"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "status",
+                "type": "stringValue",
+                "stringValue": "={{ (() => { const response = String($json.text || $json.output || $json.response || ''); const hasResponse = response.trim().length > 0; const hasAnswer = /(^|\\D)15(\\D|$)/.test(response); const looksTurkish = /(ben|bir|ve|ile|toplam|toplamı|cevap|Türkçe|asistan|model)/i.test(response); return hasResponse && hasAnswer && looksTurkish ? 'SUCCESS' : 'FAILED'; })() }}"
+              },
+              {
+                "name": "model",
+                "type": "stringValue",
+                "stringValue": "qwen3.5:9b"
+              },
+              {
+                "name": "prompt",
+                "type": "stringValue",
+                "stringValue": "={{ $('Edit Fields/Test Prompt').item.json.prompt }}"
+              },
+              {
+                "name": "response",
+                "type": "stringValue",
+                "stringValue": "={{ $json.text || $json.output || $json.response || '' }}"
+              },
+              {
+                "name": "tested_at",
+                "type": "stringValue",
+                "stringValue": "={{ $now.toISO() }}"
+              }
+            ]
+          },
+          "include": "none",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          760,
+          0
+        ],
+        "id": "410fc1e2-9035-4338-92c9-d1648ad904fe",
+        "name": "Edit Fields/Result"
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Edit Fields/Test Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Edit Fields/Test Prompt": {
+        "main": [
+          [
+            {
+              "node": "Basic LLM Chain",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Basic LLM Chain": {
+        "main": [
+          [
+            {
+              "node": "Edit Fields/Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ollama Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Basic LLM Chain",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": {},
+    "nodeGroups": [],
+    "pinData": {},
+    "tags": []
+  }
+]
