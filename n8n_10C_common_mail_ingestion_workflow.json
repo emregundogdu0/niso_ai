@@ -1,0 +1,60 @@
+{
+  "name": "10C_Common_Mail_Ingestion",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-subworkflow",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "command": "node -e \"\nconst { ingestCommonMail } = require('./tools/mail_ingestion_engine');\nconst inputMsg = JSON.parse(process.env.RAW_MESSAGE || '{}');\ningestCommonMail(inputMsg).then(res => {\n  console.log(JSON.stringify(res));\n}).catch(err => {\n  console.error(err);\n  process.exit(1);\n});\n\""
+      },
+      "id": "execute-mail-ingestion-pipeline",
+      "name": "Execute 25-Step Mail Ingestion Pipeline",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawStdout = $input.first().json.stdout || '{}';\nlet result = {};\ntry {\n  result = JSON.parse(rawStdout);\n} catch (e) {\n  result = { decision: 'PROCESSING_ERROR', error: e.message };\n}\n\nreturn [{ json: result }];"
+      },
+      "id": "parse-ingestion-result",
+      "name": "Parse Ingestion Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute 25-Step Mail Ingestion Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute 25-Step Mail Ingestion Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Parse Ingestion Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
