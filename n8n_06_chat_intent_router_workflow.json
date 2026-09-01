@@ -211,27 +211,23 @@
       },
       {
         "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "routed_intent",
-                "type": "stringValue",
-                "stringValue": "ATTENDANCE_SQL"
-              }
-            ]
+          "workflowId": {
+            "__rl": true,
+            "value": "secureTextToSql09",
+            "mode": "id"
           },
-          "include": "all",
-          "options": {}
+          "options": {
+            "waitForSubWorkflow": true
+          }
         },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
         "position": [
           1300,
           -100
         ],
         "id": "b6666666-2222-4666-8666-666666666666",
-        "name": "Attendance SQL Placeholder"
+        "name": "Execute Sub-Workflow Attendance SQL"
       },
       {
         "parameters": {
@@ -424,7 +420,7 @@
           ],
           [
             {
-              "node": "Attendance SQL Placeholder",
+              "node": "Execute Sub-Workflow Attendance SQL",
               "type": "main",
               "index": 0
             }
@@ -452,7 +448,7 @@
           ]
         ]
       },
-      "HR Route Placeholder": {
+      "Execute Sub-Workflow HR Hybrid": {
         "main": [
           [
             {
@@ -463,7 +459,7 @@
           ]
         ]
       },
-      "Attendance SQL Placeholder": {
+      "Execute Sub-Workflow Attendance SQL": {
         "main": [
           [
             {
