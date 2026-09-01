@@ -1,0 +1,285 @@
+[
+  {
+    "id": "hrHybridCagRagAnswer07",
+    "name": "07_HR_Hybrid_CAG_RAG_Answer",
+    "active": false,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {},
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "c1111111-1111-4111-8111-111111111111",
+        "name": "Execute Workflow Trigger"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT id, snapshot_version, content, content_hash, policy_count, token_estimate FROM hr.policy_snapshot WHERE is_active = true LIMIT 1;",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          260,
+          -100
+        ],
+        "id": "c2222222-1111-4222-8222-222222222222",
+        "name": "Load Active CAG Snapshot",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:11434/api/embed",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"model\": \"qwen3-embedding:0.6b\",\n  \"input\": $('Execute Workflow Trigger').first().json.question\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          260,
+          100
+        ],
+        "id": "c2222222-2222-4222-8222-222222222222",
+        "name": "Generate Query Embedding"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT \n  c.id AS chunk_id,\n  d.external_id AS policy_code,\n  d.title,\n  c.content,\n  c.metadata->>'category' AS category,\n  c.metadata->>'source_section' AS source_section,\n  c.metadata->>'owner' AS owner,\n  c.metadata->>'effective_from' AS effective_from,\n  c.metadata->>'effective_to' AS effective_to,\n  (c.metadata->>'version')::int AS version,\n  ROUND((1 - (c.embedding <=> $1::vector))::numeric, 4) AS cosine_similarity,\n  ROUND((c.embedding <=> $1::vector)::numeric, 4) AS cosine_distance\nFROM rag.chunk c\nJOIN rag.document d ON c.document_id = d.id\nWHERE d.is_active = true\nORDER BY c.embedding <=> $1::vector ASC\nLIMIT 12;",
+          "options": {
+            "queryReplacement": "={{ [ '[' + $('Generate Query Embedding').first().json.embeddings[0].join(',') + ']' ] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          520,
+          100
+        ],
+        "id": "c3333333-3333-4333-8333-333333333333",
+        "name": "PGVector RAG Retrieval",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const triggerItem = $('Execute Workflow Trigger').first().json;\nconst question = String(triggerItem.question || '').trim();\nconst sessionId = triggerItem.session_id || 'hr_session_' + Date.now();\nconst requestId = triggerItem.request_id || require('crypto').randomUUID();\nconst startTime = Date.now();\n\nconst ragItems = $input.all().map(i => i.json);\nconst cagItem = $('Load Active CAG Snapshot').first()?.json || null;\n\n// Filter RAG chunks by similarity >= 0.28\nconst validChunks = ragItems.filter(c => parseFloat(c.cosine_similarity) >= 0.28);\n\n// Deduplicate by policy_code\nconst uniqueMap = new Map();\nfor (const chunk of validChunks) {\n  if (!uniqueMap.has(chunk.policy_code)) {\n    uniqueMap.set(chunk.policy_code, chunk);\n  }\n}\nconst finalChunks = Array.from(uniqueMap.values()).slice(0, 6);\n\nlet routeUsed = 'NONE';\nif (finalChunks.length > 0 && cagItem) {\n  routeUsed = 'CAG_RAG';\n} else if (finalChunks.length > 0) {\n  routeUsed = 'RAG';\n} else if (cagItem) {\n  routeUsed = 'CAG';\n}\n\nif (finalChunks.length === 0) {\n  return [{\n    json: {\n      has_evidence: false,\n      question,\n      session_id: sessionId,\n      request_id: requestId,\n      start_time: startTime,\n      route_used: 'NONE',\n      confidence: 0.0,\n      sources: [],\n      prompt: '',\n      fallback_answer: '**Özet Cevap:**\\nBu konuda onaylı şirket İK politikası bulunamadı.\\n\\n> ℹ️ *Not: Bu sorgu için sistemde onaylı bir İK kuralı veya politika kaydı mevcut değildir.*'\n    }\n  }];\n}\n\nlet contextText = '=== RESMİ İK POLİTİKA KANITLARI ===\\n\\n';\ncontextText += finalChunks.map((c, i) => `[KANIT ${i + 1}: ${c.policy_code} - ${c.title}]\\nKategori: ${c.category}\\nBölüm: ${c.source_section} | Sürüm: ${c.version}\\nİçerik: ${c.content}`).join('\\n\\n---\\n\\n');\n\nconst systemPrompt = `Sen Yönetim Bilgi Asistanı'nın uzman İK Politika Danışmanısın.\\nGörevin, yalnızca ve yalnızca sana sağlanan resmi İK politika kanıtlarını kullanarak kullanıcının sorusunu Türkçe olarak yanıtlamaktır.\\n\\nTEMEL KURALLAR:\\n1. SADECE SAĞLANAN KANITLARI KULLAN: Kanıtlarda yer almayan hiçbir bilgiyi uydurma veya varsayma.\\n2. KANIT YOKSA ASLA TAHMİN ETME: Cevap yoksa \\\"Bu konuda onaylı şirket İK politikası bulunamadı.\\\" de.\\n3. ÇELİŞKİ DURUMU: En yüksek sürüm numaralı kuralı esas al ve sürüm farkını belirt.\\n4. SENTETİK DEMO BİLDİRİMİ: Cevabın sonunda sentetik demo İK politikası olduğunu belirt.\\n5. STANDART ÇIKTI YAPISI:\\n- **Özet Cevap:** (1-2 cümlelik net doğrudan yanıt)\\n- **Detaylar ve Koşullar:** (Uygulama şartları, süreler, istisnalar)\\n- **Kaynak Politikalar:** (Örn: [HR-xxx] Kategori - Başlık (Bölüm x, Sürüm y))\\n- > ℹ️ *Not: Bu yanıt sentetik demo İK veri seti üzerinden üretilmiştir.*`;\n\nconst fullPrompt = `${systemPrompt}\\n\\nAŞAĞIDAKİ RESMİ İK KANITLARINI KULLANARAK SORUYU YANITLA:\\n\\n${contextText}\\n\\nKULLANICI SORUSU: \\\"${question}\\\"\\n\\nCEVAP:`;\n\nconst sources = finalChunks.map(c => ({\n  policy_code: c.policy_code,\n  title: c.title,\n  section: c.source_section || 'Genel',\n  version: c.version || 1,\n  effective_date: `${c.effective_from || ''} - ${c.effective_to || 'Süresiz'}`,\n  similarity: parseFloat(c.cosine_similarity)\n}));\n\nreturn [{\n  json: {\n    has_evidence: true,\n    question,\n    session_id: sessionId,\n    request_id: requestId,\n    start_time: startTime,\n    route_used: routeUsed,\n    confidence: parseFloat(finalChunks[0].cosine_similarity),\n    sources,\n    prompt: fullPrompt,\n    fallback_answer: ''\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          0
+        ],
+        "id": "c4444444-4444-4444-8444-444444444444",
+        "name": "Evidence Merge & Prompt Builder"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:11434/api/generate",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"prompt\": $json.prompt,\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.1\n  }\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1040,
+          0
+        ],
+        "id": "c5555555-5555-4555-8555-555555555555",
+        "name": "Qwen3.5-9B Answer Generator"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const evidence = $('Evidence Merge & Prompt Builder').first().json;\n\nlet finalAnswer = '';\nif (!evidence.has_evidence) {\n  finalAnswer = evidence.fallback_answer;\n} else {\n  const httpRes = $input.first()?.json || {};\n  let raw = httpRes.response || '';\n  raw = raw.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();\n  finalAnswer = raw || evidence.fallback_answer;\n}\n\nconst latencyMs = Date.now() - evidence.start_time;\n\nreturn [{\n  json: {\n    request_id: evidence.request_id,\n    session_id: evidence.session_id,\n    question: evidence.question,\n    answer: finalAnswer,\n    route_used: evidence.route_used,\n    sources: evidence.sources,\n    confidence: evidence.confidence,\n    synthetic_notice: 'Sentetik Demo Veri',\n    latency_ms: latencyMs\n  }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          0
+        ],
+        "id": "c6666666-6666-4666-8666-666666666666",
+        "name": "Output Guard & Source Formatter"
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO audit.chat_request (\n  request_id, session_id, question, intent,\n  confidence, status, latency_ms, metadata, created_at\n) VALUES (\n  $1::uuid,\n  $2::text,\n  $3::text,\n  'HR_POLICY',\n  $4::numeric,\n  $5::text,\n  $6::int,\n  $7::jsonb,\n  now()\n)\nRETURNING request_id, created_at;",
+          "options": {
+            "queryReplacement": "={{ [ $json.request_id, $json.session_id, $json.question, $json.confidence, ($json.sources.length > 0 ? 'SUCCESS' : 'NO_EVIDENCE'), $json.latency_ms, JSON.stringify({ route_used: $json.route_used, sources_count: $json.sources.length, sources: $json.sources, synthetic_notice: $json.synthetic_notice }) ] }}"
+          }
+        },
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.7,
+        "position": [
+          1560,
+          0
+        ],
+        "id": "c7777777-7777-4777-8777-777777777777",
+        "name": "Audit Log to Postgres",
+        "credentials": {
+          "postgres": {
+            "id": "postgresManagementAi01",
+            "name": "PostgreSQL Management AI"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "fields": {
+            "values": [
+              {
+                "name": "answer",
+                "type": "stringValue",
+                "stringValue": "={{ $('Output Guard & Source Formatter').item.json.answer }}"
+              },
+              {
+                "name": "route_used",
+                "type": "stringValue",
+                "stringValue": "={{ $('Output Guard & Source Formatter').item.json.route_used }}"
+              },
+              {
+                "name": "sources",
+                "type": "arrayValue",
+                "arrayValue": "={{ $('Output Guard & Source Formatter').item.json.sources }}"
+              },
+              {
+                "name": "confidence",
+                "type": "numberValue",
+                "numberValue": "={{ $('Output Guard & Source Formatter').item.json.confidence }}"
+              },
+              {
+                "name": "synthetic_notice",
+                "type": "stringValue",
+                "stringValue": "Sentetik Demo Veri"
+              }
+            ]
+          },
+          "include": "none",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.2,
+        "position": [
+          1820,
+          0
+        ],
+        "id": "c8888888-8888-4888-8888-888888888888",
+        "name": "Return Structured Output"
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Load Active CAG Snapshot",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Generate Query Embedding",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Generate Query Embedding": {
+        "main": [
+          [
+            {
+              "node": "PGVector RAG Retrieval",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PGVector RAG Retrieval": {
+        "main": [
+          [
+            {
+              "node": "Evidence Merge & Prompt Builder",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Evidence Merge & Prompt Builder": {
+        "main": [
+          [
+            {
+              "node": "Qwen3.5-9B Answer Generator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Qwen3.5-9B Answer Generator": {
+        "main": [
+          [
+            {
+              "node": "Output Guard & Source Formatter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Output Guard & Source Formatter": {
+        "main": [
+          [
+            {
+              "node": "Audit Log to Postgres",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Audit Log to Postgres": {
+        "main": [
+          [
+            {
+              "node": "Return Structured Output",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    }
+  }
+]
