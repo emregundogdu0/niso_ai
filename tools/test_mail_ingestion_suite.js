@@ -426,8 +426,8 @@ async function runTestSuite() {
     plain_text_body: 'Yeni API uç noktası devreye alındı.\n\nSaygılarımla,\nAli Veli\nTel: +90 555 123 4567\n\n> On 2026-08-30 Ahmet wrote:\n> Eski API ne zaman kapanacak?'
   };
   const sigRes = await ingestCommonMail(sigMsg);
-  const chunkRows = runAdminPsqlJson(`SELECT chunk_content FROM rag.document_chunk WHERE chunk_content LIKE '%Yeni API uç noktası devreye alındı.%'`);
-  if (sigRes.decision === 'ACCEPTED_BUSINESS' && chunkRows.length > 0 && !chunkRows[0].chunk_content.includes('Eski API ne zaman kapanacak')) {
+  const chunkRows = runAdminPsqlJson(`SELECT content FROM rag.chunk WHERE content LIKE '%Yeni API uç noktası devreye alındı.%'`);
+  if (sigRes.decision === 'ACCEPTED_BUSINESS' && chunkRows.length > 0 && !chunkRows[0].content.includes('Eski API ne zaman kapanacak')) {
     passedCount++;
     console.log('✅ SUCCESS (Quoted thread successfully stripped)');
   } else {
@@ -506,25 +506,31 @@ async function runTestSuite() {
   const accuracyRate = (passedCount / totalTests) * 100;
   const avgLatency = Math.round(totalLatency / 20);
 
-  const acceptedCount = runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision = 'ACCEPTED_BUSINESS'`)[0].count;
-  const rejectedCount = runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision LIKE 'REJECTED_%'`)[0].count;
-  const manualCount = runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision = 'MANUAL_REVIEW'`)[0].count;
-  const dupCount = runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision = 'DUPLICATE'`)[0].count;
-  const ragDocsCount = runAdminPsqlJson(`SELECT COUNT(*) FROM rag.document WHERE source_type = 'EMAIL'`)[0].count;
+  const acceptedCount = parseInt(runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision = 'ACCEPTED_BUSINESS'`)[0].count, 10);
+  const rejectedCount = parseInt(runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision LIKE 'REJECTED_%'`)[0].count, 10);
+  const manualCount = parseInt(runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision = 'MANUAL_REVIEW'`)[0].count, 10);
+  const dupCount = parseInt(runAdminPsqlJson(`SELECT COUNT(*) FROM mail.ingestion_event WHERE decision = 'DUPLICATE'`)[0].count, 10);
+  const ragDocsCount = parseInt(runAdminPsqlJson(`SELECT COUNT(*) FROM rag.document WHERE source_type = 'EMAIL'`)[0].count, 10);
+  const ragChunksCount = parseInt(runAdminPsqlJson(`SELECT COUNT(*) FROM rag.chunk c JOIN rag.document d ON c.document_id = d.id WHERE d.source_type = 'EMAIL'`)[0].count, 10);
+
+  const calculatedTotal = acceptedCount + rejectedCount + manualCount + dupCount;
 
   console.log('\n================================================================');
-  console.log('               EMAIL INGESTION EVALUATION SUMMARY               ');
+  console.log('         PHASE 10: SYNTHETIC EMAIL INGESTION EVALUATION         ');
   console.log('================================================================');
-  console.log(`1. Total Test Scenarios       : ${totalTests}`);
-  console.log(`2. Passed Scenarios           : ${passedCount} / ${totalTests} (${accuracyRate.toFixed(1)}%) -> ${accuracyRate >= 95 ? 'PASSED ✅' : 'FAILED ❌'}`);
-  console.log(`3. Accepted Business Emails   : ${acceptedCount} (Indexed in PGVector: ${ragDocsCount})`);
-  console.log(`4. Rejected Non-Business Mails: ${rejectedCount} (0 leaked to PGVector)`);
-  console.log(`5. Manual Review Queue        : ${manualCount}`);
-  console.log(`6. Blocked Duplicates         : ${dupCount}`);
-  console.log(`7. Average Processing Latency : ${avgLatency} ms`);
+  console.log(`1. Total Synthetic Test Scenarios: ${totalTests}`);
+  console.log(`2. Passed Synthetic Scenarios    : ${passedCount} / ${totalTests} (${accuracyRate.toFixed(1)}%) -> ${accuracyRate === 100 ? 'PASSED ✅' : 'FAILED ❌'}`);
+  console.log(`3. Accepted Business Emails      : ${acceptedCount} (Indexed in PGVector: ${ragDocsCount} docs, ${ragChunksCount} chunks)`);
+  console.log(`4. Rejected Non-Business Mails   : ${rejectedCount} (0 leaked to PGVector)`);
+  console.log(`5. Manual Review Queue           : ${manualCount}`);
+  console.log(`6. Blocked Duplicate Emails      : ${dupCount} (1 Same Provider ID, 1 Cross-Provider)`);
+  console.log(`7. Verified Total Ingested Events: ${calculatedTotal} / ${totalTests} (${calculatedTotal === totalTests ? 'EXACT MATCH ✅' : 'MISMATCH ❌'})`);
+  console.log(`8. Average Processing Latency    : ${avgLatency} ms`);
   console.log('================================================================\n');
 
-  if (accuracyRate < 95) {
+  // Hard Assertions for Quality Gate
+  if (accuracyRate !== 100 || calculatedTotal !== 26 || dupCount !== 2 || acceptedCount !== 12 || rejectedCount !== 10 || manualCount !== 2) {
+    console.error(`Assertion failure: Expected 12 accepted, 10 rejected, 2 manual, 2 duplicate = 26 total.`);
     process.exit(1);
   }
 }

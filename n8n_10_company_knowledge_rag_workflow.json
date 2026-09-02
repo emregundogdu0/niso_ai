@@ -1,43 +1,115 @@
 {
+  "updatedAt": "2026-09-01T13:08:23.779Z",
+  "createdAt": "2026-09-01T13:08:23.779Z",
+  "id": "BK5fKY49Tezk6hZq",
   "name": "10_Company_Knowledge_RAG_Answer",
+  "description": null,
+  "active": false,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {},
-      "id": "start-node",
+      "id": "trigger-subworkflow",
       "name": "Execute Workflow Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [
+        200,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const question = $json.question || $json.normalized_question || '';\nconst sessionId = $json.session_id || 'knowledge_session';\nreturn [{ json: { question, session_id: sessionId } }];"
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-embedding:0.6b\",\n  \"prompt\": {{ JSON.stringify($json.question || $json.query || '') }}\n}",
+        "options": {}
       },
-      "id": "normalize-input",
-      "name": "Normalize Input",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [450, 300]
+      "id": "generate-knowledge-embedding",
+      "name": "Generate Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        450,
+        300
+      ]
     },
     {
       "parameters": {
-        "command": "node tools/company_knowledge_rag_engine.js \"{{ $json.question }}\""
+        "operation": "executeQuery",
+        "query": "SELECT id, title, content, 1 - (embedding <=> $1::vector) AS similarity FROM knowledge.company_doc_chunk ORDER BY embedding <=> $1::vector ASC LIMIT 3;",
+        "options": {
+          "queryReplacement": "={{ [\n  '[' + $json.embedding.join(',') + ']'\n] }}"
+        }
       },
-      "id": "execute-rag-engine",
-      "name": "Execute Knowledge RAG Engine",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [650, 300]
+      "id": "fetch-knowledge-chunks",
+      "name": "Retrieve Company Knowledge Chunks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const rawOutput = $json.stdout || '';\nlet answer = 'Kurumsal bilgi tabanında bilgi bulunamadı.';\nlet sources = [];\n\nconst answerMatch = rawOutput.match(/--- ANSWER ---\\s*([\\s\\S]*)$/);\nif (answerMatch) {\n  answer = answerMatch[1].trim();\n}\n\nconst sourcesMatch = rawOutput.match(/--- SOURCES ---\\s*(.*)/);\nif (sourcesMatch) {\n  sources = sourcesMatch[1].split(',').map(s => s.trim());\n}\n\nreturn [{\n  json: {\n    answer,\n    sources,\n    raw_stdout: rawOutput\n  }\n}];"
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"prompt\": {{ JSON.stringify(\"Aşağıdaki kurumsal şirket dokümanını inceleyerek soruyu yanıtla:\\n\\n\" + ($input.all().map(i => i.json.content).join('\\n---\\n')) + \"\\n\\nSORU: \" + $('Execute Workflow Trigger').first().json.question + \"\\n\\nCEVAP:\") }},\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.1\n  }\n}",
+        "options": {}
       },
-      "id": "format-response",
+      "id": "generate-knowledge-response",
+      "name": "Qwen3.5-9B Answer Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "answer",
+              "type": "stringValue",
+              "stringValue": "={{ $json.response }}"
+            },
+            {
+              "name": "route_used",
+              "type": "stringValue",
+              "stringValue": "COMPANY_KNOWLEDGE"
+            },
+            {
+              "name": "timestamp",
+              "type": "stringValue",
+              "stringValue": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "format-knowledge-response",
       "name": "Format Knowledge Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [850, 300]
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        300
+      ]
     }
   ],
   "connections": {
@@ -45,25 +117,36 @@
       "main": [
         [
           {
-            "node": "Normalize Input",
+            "node": "Generate Query Embedding",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Normalize Input": {
+    "Generate Query Embedding": {
       "main": [
         [
           {
-            "node": "Execute Knowledge RAG Engine",
+            "node": "Retrieve Company Knowledge Chunks",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute Knowledge RAG Engine": {
+    "Retrieve Company Knowledge Chunks": {
+      "main": [
+        [
+          {
+            "node": "Qwen3.5-9B Answer Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen3.5-9B Answer Generator": {
       "main": [
         [
           {
@@ -77,5 +160,39 @@
   },
   "settings": {
     "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "05e0f041-6d81-49ae-b09f-8b37dada8d0c",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.780Z",
+      "createdAt": "2026-09-01T13:08:23.780Z",
+      "role": "workflow:owner",
+      "workflowId": "BK5fKY49Tezk6hZq",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
   }
 }

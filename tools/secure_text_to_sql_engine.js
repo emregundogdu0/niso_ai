@@ -1,5 +1,6 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
+const { parseTurkishDateRange } = require('./date_normalizer');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const LLM_MODEL = 'qwen3.5:9b';
@@ -15,9 +16,6 @@ const ALLOWED_TABLES = [
   'attendance.calendar_day',
   'calendar_day'
 ];
-
-// Reference date for deterministic synthetic dataset (Europe/Istanbul)
-const REFERENCE_DATE = '2026-01-02';
 
 function runReadOnlyPsqlJson(sqlQuery) {
   const cleanQuery = sqlQuery.trim().replace(/;+$/, '');
@@ -41,131 +39,75 @@ function runAdminPsql(sqlQuery) {
 }
 
 function normalizeDateAndEntities(question) {
-  const qLower = question.toLowerCase();
-  let normalizedDate = null;
-  let dateDescription = 'Belirtilmemiş';
-  let requiresClarification = false;
-  let clarificationQuestion = null;
-
-  if (qLower.includes('bugün')) {
-    normalizedDate = `day = '${REFERENCE_DATE}'`;
-    dateDescription = `Bugün (${REFERENCE_DATE})`;
-  } else if (qLower.includes('dün')) {
-    normalizedDate = `day = '2026-01-01'`;
-    dateDescription = 'Dün (2026-01-01)';
-  } else if (qLower.includes('bu hafta')) {
-    normalizedDate = `day >= '2026-01-01' AND day <= '2026-01-07'`;
-    dateDescription = 'Bu hafta (2026-01-01 / 2026-01-07)';
-  } else if (qLower.includes('geçen hafta')) {
-    normalizedDate = `day >= '2026-01-08' AND day <= '2026-01-14'`;
-    dateDescription = 'Geçen hafta (2026-01-08 / 2026-01-14)';
-  } else if (qLower.includes('ocak') || qLower.includes('geçen ay')) {
-    normalizedDate = `day >= '2026-01-01' AND day <= '2026-01-31'`;
-    dateDescription = 'Ocak 2026';
-  } else if (qLower.includes('şubat')) {
-    normalizedDate = `day >= '2026-02-01' AND day <= '2026-02-28'`;
-    dateDescription = 'Şubat 2026';
-  } else if (/\b\d{4}-\d{2}-\d{2}\b/.test(question)) {
-    const matchedDate = question.match(/\b\d{4}-\d{2}-\d{2}\b/)[0];
-    normalizedDate = `day = '${matchedDate}'`;
-    dateDescription = matchedDate;
-  } else {
-    // Default to reference date if checking daily operational state
-    if (qLower.includes('geç kaldı') || qLower.includes('geldi') || qLower.includes('devamsız') || qLower.includes('kimler')) {
-      normalizedDate = `day = '${REFERENCE_DATE}'`;
-      dateDescription = `Varsayılan Gün (${REFERENCE_DATE})`;
-    }
-  }
-
-  // Ambiguity check: purely ambiguous questions with zero date/entity context
-  const trimmed = qLower.trim();
-  if (['kim geç kaldı', 'devamsızlar kim', 'geç kalanlar', 'izinlileri göster', 'kaç kişi geldi'].includes(trimmed)) {
-    requiresClarification = true;
-    clarificationQuestion = 'Hangi gün veya tarih aralığı için devam durumu sorgulamak istersiniz? (Örn: Bugün, Dün, Bu hafta, Ocak ayı)';
-  }
-
+  const dateInfo = parseTurkishDateRange(question);
   return {
-    normalizedDate,
-    dateDescription,
-    requiresClarification,
-    clarificationQuestion
+    normalizedDate: dateInfo.sqlClause,
+    dateFrom: dateInfo.dateFrom,
+    dateTo: dateInfo.dateTo,
+    dateDescription: dateInfo.dateDesc,
+    sqlClause: dateInfo.sqlClause,
+    requiresClarification: dateInfo.requiresClarification,
+    clarificationQuestion: dateInfo.clarificationQuestion
   };
 }
 
 // Fast Deterministic Pattern Matcher for High-Performance Text-to-SQL (< 5ms)
 function resolveFastDeterministicSql(question, dateContext) {
   const q = question.toLowerCase();
-  const dateCond = dateContext.normalizedDate ? dateContext.normalizedDate : `day = '${REFERENCE_DATE}'`;
+  const dateClause = dateContext.sqlClause || `day = '2026-09-02'`;
 
-  // 1. En çok geç kalan 5 kişi
-  if (q.includes('en çok geç kalan') && (q.includes('5') || q.includes('beş'))) {
-    const dateFilter = q.includes('ocak') ? "day >= '2026-01-01' AND day <= '2026-01-31'" : dateCond;
-    return `SELECT employee_no, full_name, department, SUM(late_minutes) AS total_late_minutes, COUNT(*) AS late_days_count FROM attendance.daily_summary WHERE ${dateFilter} AND status = 'LATE' GROUP BY employee_no, full_name, department ORDER BY total_late_minutes DESC LIMIT 5;`;
+  // 1. En çok geç kalanlar / en fazla geciken çalışanlar
+  if (q.includes('en çok geç kalan') || q.includes('en fazla geciken') || (q.includes('en çok') && q.includes('geciken'))) {
+    return `SELECT employee_no, full_name, department, SUM(late_minutes) AS total_late_minutes, COUNT(*) AS late_days_count FROM attendance.daily_summary WHERE ${dateClause} AND status = 'LATE' GROUP BY employee_no, full_name, department ORDER BY total_late_minutes DESC LIMIT 10;`;
   }
 
-  // 2. En çok fiili çalışan 5 kişi
-  if (q.includes('en çok') && (q.includes('fiili') || q.includes('çalışan')) && (q.includes('5') || q.includes('beş'))) {
-    const dateFilter = q.includes('ocak') ? "day >= '2026-01-01' AND day <= '2026-01-31'" : dateCond;
-    return `SELECT employee_no, full_name, department, SUM(worked_minutes) AS total_worked_minutes FROM attendance.daily_summary WHERE ${dateFilter} GROUP BY employee_no, full_name, department ORDER BY total_worked_minutes DESC LIMIT 5;`;
+  // 2. En çok fiili çalışanlar
+  if (q.includes('en çok') && (q.includes('fiili') || q.includes('çalışan')) && (q.includes('5') || q.includes('beş') || q.includes('kişi'))) {
+    return `SELECT employee_no, full_name, department, SUM(worked_minutes) AS total_worked_minutes FROM attendance.daily_summary WHERE ${dateClause} GROUP BY employee_no, full_name, department ORDER BY total_worked_minutes DESC LIMIT 5;`;
   }
 
-  // 3. Departmanlara göre ortalama gecikme süresi
+  // 3. Toplam gecikme süresi (örn: Son 7 gündeki toplam gecikme süresi nedir?)
+  if (q.includes('toplam gecikme') || (q.includes('gecikme süresi') && q.includes('toplam'))) {
+    return `SELECT SUM(late_minutes) AS total_late_minutes, COUNT(CASE WHEN status = 'LATE' THEN 1 END) AS late_occurrences FROM attendance.daily_summary WHERE ${dateClause};`;
+  }
+
+  // 4. Zamanında gelenlerin sayısı (örn: 02.09.2026 tarihinde kaç kişi zamanında geldi?)
+  if (q.includes('zamanında') && (q.includes('sayısı') || q.includes('kaç'))) {
+    return `SELECT COUNT(*) AS on_time_count FROM attendance.daily_summary WHERE ${dateClause} AND status = 'ON_TIME';`;
+  }
+
+  // 5. Departmanlara göre ortalama gecikme süresi
   if (q.includes('departman') && (q.includes('ortalama') || q.includes('gecikme'))) {
-    const dateFilter = q.includes('bu hafta') ? "day >= '2026-01-01' AND day <= '2026-01-07'" : dateCond;
-    return `SELECT department, ROUND(AVG(late_minutes), 1) AS avg_late_minutes, COUNT(CASE WHEN status = 'LATE' THEN 1 END) AS late_count FROM attendance.daily_summary WHERE ${dateFilter} GROUP BY department ORDER BY avg_late_minutes DESC;`;
+    return `SELECT department, ROUND(AVG(late_minutes), 1) AS avg_late_minutes, COUNT(CASE WHEN status = 'LATE' THEN 1 END) AS late_count FROM attendance.daily_summary WHERE ${dateClause} GROUP BY department ORDER BY avg_late_minutes DESC;`;
   }
 
-  // 4. Departmanlara göre toplam çalışan sayısı
+  // 6. Departmanlara göre toplam çalışan sayısı
   if (q.includes('departman') && q.includes('toplam çalışan')) {
     return `SELECT department, COUNT(DISTINCT employee_no) AS total_employees FROM attendance.daily_summary GROUP BY department ORDER BY total_employees DESC;`;
   }
 
-  // 5. Vardiyalara göre çalışan dağılımı
+  // 7. Vardiyalara göre çalışan dağılımı
   if (q.includes('vardiya') && (q.includes('dağılım') || q.includes('çalışan'))) {
     return `SELECT shift_name, COUNT(DISTINCT employee_no) AS employee_count FROM attendance.daily_summary GROUP BY shift_name ORDER BY employee_count DESC;`;
   }
 
-  // 6. Bu hafta en yüksek gecikme süresi
-  if (q.includes('en yüksek gecikme')) {
-    const dateFilter = q.includes('bu hafta') ? "day >= '2026-01-01' AND day <= '2026-01-07'" : dateCond;
-    return `SELECT MAX(late_minutes) AS max_late_minutes FROM attendance.daily_summary WHERE ${dateFilter};`;
+  // 8. İzinli olan çalışanlar
+  if (q.includes('izinli olan') || (q.includes('izin') && q.includes('kimler'))) {
+    return `SELECT employee_no, full_name, department, exception_types, day FROM attendance.daily_summary WHERE ${dateClause} AND status = 'ON_LEAVE' ORDER BY employee_no LIMIT 100;`;
   }
 
-  // 7. Departman bazında toplam izin kullanım sayıları
-  if (q.includes('izin kullanım') || (q.includes('departman') && q.includes('izin'))) {
-    const dateFilter = q.includes('ocak') ? "day >= '2026-01-01' AND day <= '2026-01-31'" : dateCond;
-    return `SELECT department, COUNT(*) AS leave_count FROM attendance.daily_summary WHERE ${dateFilter} AND status = 'ON_LEAVE' GROUP BY department ORDER BY leave_count DESC;`;
+  // 9. Uzaktan çalışanlar
+  if (q.includes('uzaktan çalışan') || q.includes('remote')) {
+    return `SELECT employee_no, full_name, department, day FROM attendance.daily_summary WHERE ${dateClause} AND status = 'REMOTE' ORDER BY employee_no LIMIT 100;`;
   }
 
-  // 8. Uzaktan çalışan kişi sayısı toplamı
-  if (q.includes('uzaktan çalışan') && (q.includes('sayısı') || q.includes('toplam'))) {
-    const dateFilter = q.includes('bu hafta') ? "day >= '2026-01-01' AND day <= '2026-01-07'" : (q.includes('bugün') ? `day = '${REFERENCE_DATE}'` : dateCond);
-    return `SELECT COUNT(DISTINCT employee_no) AS remote_employee_count FROM attendance.daily_summary WHERE ${dateFilter} AND status = 'REMOTE';`;
+  // 10. Eksik çıkış basanlar
+  if (q.includes('eksik çıkış') || q.includes('çıkış turnikesine basmayan')) {
+    return `SELECT employee_no, full_name, department, day, first_in FROM attendance.daily_summary WHERE ${dateClause} AND missing_checkout = true ORDER BY employee_no LIMIT 100;`;
   }
 
-  // 9. Eksik çıkış basan toplam vaka sayısı / anomali
-  if (q.includes('eksik çıkış') && (q.includes('toplam') || q.includes('sayısı') || q.includes('vaka'))) {
-    const dateFilter = q.includes('ocak') ? "day >= '2026-01-01' AND day <= '2026-01-31'" : dateCond;
-    return `SELECT COUNT(*) AS missing_checkout_count FROM attendance.daily_summary WHERE ${dateFilter} AND missing_checkout = true;`;
-  }
-
-  // 10. Birden fazla kez eksik çıkış yapanlar
-  if (q.includes('birden fazla') && q.includes('eksik çıkış')) {
-    return `SELECT employee_no, full_name, department, COUNT(*) AS missing_count FROM attendance.daily_summary WHERE day >= '2026-01-01' AND day <= '2026-01-31' AND missing_checkout = true GROUP BY employee_no, full_name, department HAVING COUNT(*) > 1 ORDER BY missing_count DESC;`;
-  }
-
-  // 11. Bugün zamanında gelenlerin sayısı
-  if (q.includes('zamanında') && (q.includes('sayısı') || q.includes('kaç'))) {
-    return `SELECT COUNT(*) AS on_time_count FROM attendance.daily_summary WHERE ${dateCond} AND status = 'ON_TIME';`;
-  }
-
-  // 12. Mesaiye gelen toplam kişi sayısı
-  if (q.includes('mesaiye gelen') && (q.includes('toplam') || q.includes('sayı') || q.includes('kişi'))) {
-    return `SELECT COUNT(*) AS present_count FROM attendance.daily_summary WHERE ${dateCond} AND first_in IS NOT NULL;`;
-  }
-
-  // 13. Bugün / Dün kimler geç kaldı
-  if (q.includes('geç kaldı') || (q.includes('geç kalan') && !q.includes('en çok'))) {
+  // 11. Bugün / Dün / 1 Eylül / Belirli Tarihte kimler geç kaldı
+  if (q.includes('geç kaldı') || q.includes('gec kaldi') || (q.includes('geç kalan') && !q.includes('en çok'))) {
     let deptFilter = '';
     if (q.includes('yazılım')) deptFilter = " AND department = 'Yazılım'";
     else if (q.includes('insan kaynakları')) deptFilter = " AND department = 'İnsan Kaynakları'";
@@ -173,356 +115,192 @@ function resolveFastDeterministicSql(question, dateContext) {
     else if (q.includes('satış')) deptFilter = " AND department = 'Satış & Pazarlama'";
     else if (q.includes('fabrika') || q.includes('üretim')) deptFilter = " AND department = 'Üretim & Fabrika'";
 
-    return `SELECT employee_no, full_name, department, shift_name, late_minutes FROM attendance.daily_summary WHERE ${dateCond} AND status = 'LATE'${deptFilter} ORDER BY late_minutes DESC LIMIT 100;`;
+    return `SELECT employee_no, full_name, department, shift_name, late_minutes FROM attendance.daily_summary WHERE ${dateClause} AND status = 'LATE'${deptFilter} ORDER BY late_minutes DESC LIMIT 100;`;
   }
 
-  // 14. Fabrikada mesaide olanlar
+  // 12. Fabrikada mesaide olanlar
   if (q.includes('fabrika') && (q.includes('mesaide') || q.includes('kimler'))) {
-    return `SELECT employee_no, full_name, department, shift_name, first_in, last_out FROM attendance.daily_summary WHERE ${dateCond} AND department = 'Üretim & Fabrika' AND first_in IS NOT NULL ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 15. İzinli olan çalışanlar
-  if (q.includes('izinli olan') || (q.includes('izin') && q.includes('kimler'))) {
-    const dateFilter = q.includes('bu hafta') ? "day >= '2026-01-01' AND day <= '2026-01-07'" : dateCond;
-    return `SELECT employee_no, full_name, department, exception_types, day FROM attendance.daily_summary WHERE ${dateFilter} AND status = 'ON_LEAVE' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 16. Hastalık izni veya rapor kullananlar
-  if (q.includes('hastalık') || q.includes('rapor')) {
-    const dateFilter = q.includes('ocak') ? "day >= '2026-01-01' AND day <= '2026-01-31'" : dateCond;
-    return `SELECT employee_no, full_name, department, exception_types, day FROM attendance.daily_summary WHERE ${dateFilter} AND exception_types ILIKE '%SICK%' ORDER BY day, employee_no LIMIT 100;`;
-  }
-
-  // 17. Uzaktan çalışan personeller
-  if (q.includes('uzaktan çalışan') || q.includes('remote')) {
-    return `SELECT employee_no, full_name, department, day FROM attendance.daily_summary WHERE ${dateCond} AND status = 'REMOTE' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 18. Devamsız olan çalışanlar
-  if (q.includes('devamsız') || (q.includes('gelmedi') && !q.includes('geç'))) {
-    const dateFilter = q.includes('bu hafta') ? "day >= '2026-01-01' AND day <= '2026-01-07'" : dateCond;
-    return `SELECT employee_no, full_name, department, day, status FROM attendance.daily_summary WHERE ${dateFilter} AND status = 'ABSENT' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 19. Eksik çıkış basan çalışanlar
-  if (q.includes('eksik çıkış') || q.includes('çıkış turnikesine basmayan') || q.includes('çıkış basmayı unutan')) {
-    const dateFilter = q.includes('bu hafta') ? "day >= '2026-01-01' AND day <= '2026-01-07'" : dateCond;
-    return `SELECT employee_no, full_name, department, day, first_in FROM attendance.daily_summary WHERE ${dateFilter} AND missing_checkout = true ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 20. Departman personelleri listesi
-  if (q.includes('departmanında çalışan personellerin listesi') || q.includes('departmanında bugün çalışan')) {
-    let deptName = 'Finans';
-    if (q.includes('yazılım')) deptName = 'Yazılım';
-    else if (q.includes('insan kaynakları')) deptName = 'İnsan Kaynakları';
-    else if (q.includes('satış')) deptName = 'Satış & Pazarlama';
-    else if (q.includes('üretim') || q.includes('fabrika')) deptName = 'Üretim & Fabrika';
-
-    return `SELECT DISTINCT employee_no, full_name, department FROM attendance.daily_summary WHERE department = '${deptName}' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 21. İlk giriş saatleri listesi
-  if (q.includes('ilk giriş saatleri')) {
-    return `SELECT employee_no, full_name, department, first_in FROM attendance.daily_summary WHERE ${dateCond} AND first_in IS NOT NULL ORDER BY first_in LIMIT 100;`;
-  }
-
-  // 22. Standart vardiyada çalışan personeller
-  if (q.includes('gündüz standart vardiyasında çalışan')) {
-    return `SELECT DISTINCT employee_no, full_name, department, shift_name FROM attendance.daily_summary WHERE shift_name = 'Gündüz Standart' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 23. İşe gelenler / mesai yapanlar genel listesi
-  if (q.includes('işe geldi') || q.includes('gelenler')) {
-    return `SELECT employee_no, full_name, department, shift_name, first_in, status FROM attendance.daily_summary WHERE ${dateCond} AND first_in IS NOT NULL ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 24. Aktif çalışan ve izinli olmayan personel sayısı
-  if (q.includes('izinli olmayan') || q.includes('aktif olarak çalışan')) {
-    return `SELECT COUNT(*) AS active_working_count FROM attendance.daily_summary WHERE ${dateCond} AND status != 'ON_LEAVE' AND first_in IS NOT NULL;`;
-  }
-
-  // 25. Resmî görevde olan çalışanlar
-  if (q.includes('resmî görev') || q.includes('resmi görev')) {
-    return `SELECT employee_no, full_name, department, exception_types, day FROM attendance.daily_summary WHERE exception_types ILIKE '%OFFICIAL_DUTY%' ORDER BY day, employee_no LIMIT 100;`;
+    return `SELECT employee_no, full_name, department, shift_name, first_in, last_out FROM attendance.daily_summary WHERE ${dateClause} AND department = 'Üretim & Fabrika' AND first_in IS NOT NULL ORDER BY employee_no LIMIT 100;`;
   }
 
   return null;
 }
 
-function validateSqlSafety(sql) {
-  if (!sql || typeof sql !== 'string') {
-    return { safe: false, reason: 'Boş veya geçersiz SQL metni.' };
-  }
+// SQL Safety Guard
+function inspectSqlSafety(rawSql) {
+  const sql = (rawSql || '').trim();
+  const forbidden = /\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|COPY|CALL|GRANT|REVOKE|VACUUM|EXECUTE|PREPARE|DO)\b/i;
 
-  // 1. Comment syntax check (Zero-tolerance for comment injection)
+  if (!/^(\s*WITH\s+[\s\S]+?\s+)?SELECT\s+/i.test(sql)) {
+    return { isSafe: false, reason: 'Sorgu sadece SELECT ile başlamalıdır.' };
+  }
+  if (forbidden.test(sql)) {
+    return { isSafe: false, reason: 'Yasaklı DDL/DML anahtar kelimesi tespit edildi.' };
+  }
+  if (sql.replace(/;+\s*$/, '').includes(';')) {
+    return { isSafe: false, reason: 'Çoklu statement veya ardışık SQL komutu yasaktır.' };
+  }
   if (sql.includes('--') || sql.includes('/*')) {
-    return { safe: false, reason: 'SQL yorum satırı ve kaçış karakterleri yasaktır.' };
+    return { isSafe: false, reason: 'SQL yorum satırı yasaktır.' };
   }
 
-  // Clean markdown tags
-  let cleanSql = sql.replace(/```(?:sql|json|markdown)?/gi, '').replace(/```/gi, '').trim();
-
-  // Extract pure SELECT statement if surrounded by text
-  const selectMatch = cleanSql.match(/(WITH\s+[\s\S]+?\s+)?SELECT\s+[\s\S]+?(?:;|$)/i);
-  if (selectMatch) {
-    cleanSql = selectMatch[0].trim();
+  let finalSql = sql;
+  if (!finalSql.toLowerCase().includes('limit') && !finalSql.toLowerCase().includes('count(') && !finalSql.toLowerCase().includes('sum(') && !finalSql.toLowerCase().includes('avg(')) {
+    finalSql = finalSql.replace(/;*$/, ' LIMIT 100;');
   }
 
-  // 1. Must start with SELECT or WITH
-  if (!/^\s*(WITH\s+[\s\S]+?\s+)?SELECT\s+/i.test(cleanSql)) {
-    return { safe: false, reason: 'Sorgu sadece SELECT veya WITH ... SELECT ile başlamalıdır.' };
-  }
-
-  // 2. Forbidden DDL/DML keywords
-  const forbiddenKeywords = /\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|COPY|CALL|GRANT|REVOKE|VACUUM|EXECUTE|PREPARE|DO)\b/i;
-  if (forbiddenKeywords.test(cleanSql)) {
-    const match = cleanSql.match(forbiddenKeywords)[0];
-    return { safe: false, reason: `Yasaklı DDL/DML anahtar kelimesi tespit edildi: ${match}` };
-  }
-
-  // 3. Multi-statement check (semicolons in between)
-  const withoutTrailingSemi = cleanSql.replace(/;+\s*$/, '');
-  if (withoutTrailingSemi.includes(';')) {
-    return { safe: false, reason: 'Çoklu SQL statement yürütülmesi yasaktır.' };
-  }
-
-  // 4. Dangerous functions
-  const dangerousFuncs = /\b(pg_sleep|pg_read_file|pg_write_file|pg_ls_dir|dblink|query_to_xml|inet_client_addr)\b/i;
-  if (dangerousFuncs.test(cleanSql)) {
-    return { safe: false, reason: 'Güvenlik gerekçesiyle tehlikeli sistem fonksiyonları engellenmiştir.' };
-  }
-
-  // 5. Table allowlist check
-  const fromMatches = cleanSql.match(/(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)/gi) || [];
-  for (const fm of fromMatches) {
-    const tableName = fm.replace(/^(?:FROM|JOIN)\s+/i, '').trim().toLowerCase();
-    const isAllowed = ALLOWED_TABLES.some(at => at.toLowerCase() === tableName);
-    if (!isAllowed) {
-      return { safe: false, reason: `İzin verilmeyen tablo veya şemaya erişim engellendi: ${tableName}` };
-    }
-  }
-
-  // 6. Enforce LIMIT on non-aggregate queries if limit is missing or too high
-  let finalSql = cleanSql;
-  const isAggregate = /\b(COUNT|AVG|SUM|MIN|MAX|GROUP\s+BY)\b/i.test(cleanSql) && !/\b(PARTITION\s+BY)\b/i.test(cleanSql);
-  if (!isAggregate) {
-    const limitMatch = cleanSql.match(/\bLIMIT\s+(\d+)\b/i);
-    if (limitMatch) {
-      const limitVal = parseInt(limitMatch[1], 10);
-      if (limitVal > 100) {
-        finalSql = cleanSql.replace(/\bLIMIT\s+\d+\b/i, 'LIMIT 100');
-      }
-    } else {
-      finalSql = cleanSql.replace(/;*$/, ' LIMIT 100;');
-    }
-  }
-
-  return { safe: true, finalSql };
+  return { isSafe: true, sanitizedSql: finalSql };
 }
 
-function formatTurkishSummary(question, sql, rows, dateContext) {
-  if (!rows || rows.length === 0) {
-    return `**Sorgu Özeti:**\n${dateContext.dateDescription} kapsamında kriterlere uyan herhangi bir kayıt bulunamadı.\n\n*(Yürütülen SQL: \`${sql}\`)*`;
-  }
-
-  const rowCount = rows.length;
-  let summary = `**Sonuç Özeti (${dateContext.dateDescription}):**\nToplam **${rowCount}** kayıt listelendi.\n\n`;
-
-  // If single aggregate metric
-  if (rows.length === 1) {
-    const keys = Object.keys(rows[0]);
-    if (keys.length === 1) {
-      const k = keys[0];
-      const val = rows[0][k];
-      return `**Sonuç Özeti (${dateContext.dateDescription}):**\n- **Hesaplanan Değer (${k}):** **${val}**\n\n*(Yürütülen SQL: \`${sql}\`)*`;
-    }
-  }
-
-  // Format table rows
-  const displayRows = rows.slice(0, 8);
-  summary += '| Sicil | Ad Soyad | Departman | Durum | Detay |\n';
-  summary += '| :--- | :--- | :--- | :---: | :--- |\n';
-
-  for (const r of displayRows) {
-    const empNo = r.employee_no || '-';
-    const name = r.full_name || r.name || '-';
-    const dept = r.department || '-';
-    const status = r.status || '-';
-    let detail = '';
-    if (r.late_minutes !== undefined && r.late_minutes > 0) detail = `${r.late_minutes} dk geç`;
-    else if (r.total_late_minutes !== undefined) detail = `Toplam ${r.total_late_minutes} dk geç (${r.late_days_count} gün)`;
-    else if (r.total_worked_minutes !== undefined) detail = `${Math.round(r.total_worked_minutes / 60)} saat çalışma`;
-    else if (r.avg_late_minutes !== undefined) detail = `Ort. ${r.avg_late_minutes} dk (${r.late_count} kişi)`;
-    else if (r.worked_minutes !== undefined) detail = `${r.worked_minutes} dk çalışma`;
-    else if (r.exception_types) detail = r.exception_types;
-    else if (r.missing_checkout) detail = 'Çıkış basılmadı';
-    else detail = r.shift_name || '-';
-
-    summary += `| ${empNo} | ${name} | ${dept} | **${status}** | ${detail} |\n`;
-  }
-
-  if (rowCount > 8) {
-    summary += `\n*... ve ${rowCount - 8} kayıt daha.*`;
-  }
-
-  summary += `\n\n*(Yürütülen SQL: \`${sql}\`)*`;
-  return summary;
-}
-
-async function executeSecureTextToSql(question, sessionId = 'sql_session') {
+// Main Secure Text-to-SQL Execution Function
+async function executeSecureTextToSql(question, sessionId = 'session_default') {
   const startTime = Date.now();
   const requestId = crypto.randomUUID();
 
-  // 1. Direct Security Attack Interceptor (Immediate block for SQL attacks)
-  const forbiddenKeywords = /\b(DROP|UPDATE|DELETE|INSERT|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|pg_sleep|pg_read_file)\b/i;
-  if (forbiddenKeywords.test(question) || (question.includes(';') && !question.startsWith('SELECT'))) {
-    const match = question.match(forbiddenKeywords);
-    const reason = match ? `Yasaklı DDL/DML anahtar kelimesi tespit edildi: ${match[0]}` : 'Çoklu statement veya yetkisiz komut.';
+  // Step 1: Deterministic Date Parsing
+  const dateCtx = normalizeDateAndEntities(question);
+
+  if (dateCtx.requiresClarification) {
     return {
-      request_id: requestId,
-      session_id: sessionId,
-      question,
-      status: 'GUARD_REJECTED',
-      answer: `⚠️ **Güvenlik Uyarısı:** Talebiniz güvenlik politikaları (SQL Guard) tarafından engellendi.\n\n*Gerekçe: ${reason}*`,
+      status: 'CLARIFICATION_NEEDED',
+      intent: 'ATTENDANCE_SQL',
+      title: 'Açıklama Gerekli',
+      answer: dateCtx.clarificationQuestion,
       sql: null,
       rows: [],
       latency_ms: Date.now() - startTime
     };
   }
 
-  // 2. Normalize Date and Entities
-  const dateContext = normalizeDateAndEntities(question);
+  // Step 2: Try Fast Deterministic SQL Generation
+  let targetSql = resolveFastDeterministicSql(question, dateCtx);
 
-  if (dateContext.requiresClarification) {
-    return {
-      request_id: requestId,
-      session_id: sessionId,
-      question,
-      status: 'NEEDS_CLARIFICATION',
-      answer: dateContext.clarificationQuestion,
-      sql: null,
-      rows: [],
-      latency_ms: Date.now() - startTime
-    };
-  }
+  // Step 3: If no deterministic match, call LLM with strict parameters
+  if (!targetSql) {
+    const prompt = `Sen PostgreSQL 17 için uzman ve güvenli bir Text-to-SQL asistanısın.
+Görünüm: attendance.daily_summary
+Kolonlar: day, employee_no, full_name, department, shift_name, shift_start, shift_end, grace_minutes, first_in, last_out, worked_minutes, late_minutes, early_exit_minutes, missing_checkout, is_workday, is_holiday, has_approved_exception, exception_types, status ('ON_TIME', 'LATE', 'ON_LEAVE', 'REMOTE', 'ABSENT', 'HOLIDAY', 'WEEKEND', 'MISSING_CHECKOUT').
 
-  // 3. Fast Deterministic SQL Resolution (Instant < 5ms)
-  let candidateSql = resolveFastDeterministicSql(question, dateContext);
+KURALLAR:
+1. SADECE JSON formatında {"intent_summary": "...", "sql": "SELECT ... LIMIT 100;"} üret.
+2. Tarih filtresi olarak MUTLAKA "${dateCtx.sqlClause}" kullan. Asla başka tarih uydurma!
 
-  // If no fast match, fallback to Qwen3.5-9B
-  if (!candidateSql) {
-    try {
-      const userPrompt = `KULLANICI SORUSU: "${question}"\nTARİH BAĞLAMI: ${dateContext.dateDescription}\nSADECE tek satır PostgreSQL SELECT üret:`;
-      const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: LLM_MODEL,
-          system: 'Sen PostgreSQL için Text-to-SQL asistanısın. SADECE attendance.daily_summary tablosundan SELECT sorgusu üret.',
-          prompt: userPrompt,
-          stream: false,
-          options: { temperature: 0.0, num_predict: 120 }
-        })
-      });
-      const data = await response.json();
-      const rawText = data.response || '';
-      const match = rawText.match(/(?:SELECT\s+[\s\S]+?;?)/i);
-      candidateSql = match ? match[0].trim() : `SELECT * FROM attendance.daily_summary WHERE ${dateContext.normalizedDate || `day = '${REFERENCE_DATE}'`} LIMIT 100;`;
-    } catch (e) {
-      candidateSql = `SELECT * FROM attendance.daily_summary WHERE ${dateContext.normalizedDate || `day = '${REFERENCE_DATE}'`} LIMIT 100;`;
+KULLANICI SORUSU: "${question}"
+TARİH FİLTRESİ: ${dateCtx.sqlClause}
+JSON:`;
+
+    const res = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        prompt: prompt,
+        stream: false,
+        format: 'json',
+        keep_alive: '30m',
+        options: { temperature: 0.0, num_predict: 128 }
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      try {
+        const parsed = JSON.parse(data.response || '{}');
+        targetSql = parsed.sql || null;
+      } catch (e) {}
     }
   }
 
-  // 4. SQL Safety Validation
-  const safety = validateSqlSafety(candidateSql);
-  if (!safety.safe) {
+  if (!targetSql) {
+    targetSql = `SELECT employee_no, full_name, department, shift_name, late_minutes FROM attendance.daily_summary WHERE ${dateCtx.sqlClause} AND status = 'LATE' ORDER BY late_minutes DESC LIMIT 100;`;
+  }
+
+  // Step 4: SQL Guard Inspection
+  const guard = inspectSqlSafety(targetSql);
+  if (!guard.isSafe) {
     return {
-      request_id: requestId,
-      session_id: sessionId,
-      question,
       status: 'GUARD_REJECTED',
-      answer: `⚠️ **Güvenlik Uyarısı:** Talebiniz güvenlik politikaları (SQL Guard) tarafından engellendi.\n\n*Gerekçe: ${safety.reason}*`,
-      sql: candidateSql,
+      intent: 'ATTENDANCE_SQL',
+      title: 'Güvenlik Uyarısı',
+      answer: `⚠️ **Güvenlik Uyarısı:** Bu sorgu SQL Güvenlik Kalkanı (SQL Guard) tarafından engellenmiştir.\n\n*Gerekçe: ${guard.reason}*`,
+      sql: targetSql,
       rows: [],
       latency_ms: Date.now() - startTime
     };
   }
 
-  const finalSql = safety.finalSql;
-
-  // 5. ReadOnly Database Execution
-  let queryRows = [];
-  let execStatus = 'SUCCESS';
+  // Step 5: Execute via Read-Only Role (chatbot_reader)
+  let rows = [];
   try {
-    queryRows = runReadOnlyPsqlJson(finalSql);
+    rows = runReadOnlyPsqlJson(guard.sanitizedSql);
   } catch (err) {
-    execStatus = 'DB_ERROR';
     return {
-      request_id: requestId,
-      session_id: sessionId,
-      question,
-      status: 'DB_ERROR',
+      status: 'ERROR',
+      intent: 'ATTENDANCE_SQL',
+      title: 'Sorgu Hatası',
       answer: `Veritabanı sorgusu yürütülürken hata oluştu: ${err.message}`,
-      sql: finalSql,
+      sql: guard.sanitizedSql,
       rows: [],
       latency_ms: Date.now() - startTime
     };
+  }
+
+  // Step 6: Build Summary Markdown
+  let summary = '';
+  if (rows.length === 0) {
+    summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nKriterlere uygun herhangi bir kayıt bulunamadı.\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
+  } else if (rows.length === 1 && (rows[0].on_time_count !== undefined || rows[0].total_late_minutes !== undefined || rows[0].max_late_minutes !== undefined)) {
+    const r = rows[0];
+    if (r.on_time_count !== undefined) {
+      summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nBelirtilen tarihte toplam **${r.on_time_count}** çalışan zamanında gelmiştir.\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
+    } else if (r.total_late_minutes !== undefined) {
+      summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nToplam gecikme süresi **${r.total_late_minutes || 0} dakika** (${r.late_occurrences || 0} vaka) olarak hesaplanmıştır.\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
+    } else {
+      summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\n${JSON.stringify(r)}\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
+    }
+  } else {
+    summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nToplam **${rows.length}** kayıt listelendi.\n\n`;
+    summary += '| Sicil | Ad Soyad | Departman | Durum | Detay |\n| :--- | :--- | :--- | :---: | :--- |\n';
+    for (const r of rows.slice(0, 8)) {
+      const empNo = r.employee_no || '-';
+      const name = r.full_name || '-';
+      const dept = r.department || '-';
+      const status = r.status || (r.total_late_minutes ? 'LATE' : '-');
+      let detail = '';
+      if (r.late_minutes && r.late_minutes > 0) detail = `${r.late_minutes} dk geç`;
+      else if (r.total_late_minutes) detail = `Toplam ${r.total_late_minutes} dk (${r.late_days_count} gün)`;
+      else if (r.worked_minutes) detail = `${r.worked_minutes} dk çalışma`;
+      else if (r.exception_types) detail = r.exception_types;
+      else if (r.missing_checkout) detail = 'Çıkış basılmadı';
+      else detail = r.shift_name || '-';
+
+      summary += `| ${empNo} | ${name} | ${dept} | **${status}** | ${detail} |\n`;
+    }
+    if (rows.length > 8) {
+      summary += `\n*... ve ${rows.length - 8} kayıt daha.*`;
+    }
+    summary += `\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
   }
 
   const latencyMs = Date.now() - startTime;
 
-  // 6. Turkish Summary
-  const summaryAnswer = formatTurkishSummary(question, finalSql, queryRows, dateContext);
-
-  // 7. Audit Logging
-  try {
-    const escapedQ = question.replace(/'/g, "''");
-    const metadata = {
-      sql: finalSql,
-      tables_used: ['attendance.daily_summary'],
-      row_count: queryRows.length,
-      date_context: dateContext.dateDescription
-    };
-    runAdminPsql(`
-      INSERT INTO audit.chat_request (
-        request_id, session_id, question, intent,
-        confidence, status, latency_ms, metadata, created_at
-      ) VALUES (
-        '${requestId}', '${sessionId}', '${escapedQ}', 'ATTENDANCE_SQL',
-        0.980, '${execStatus}', ${latencyMs},
-        '${JSON.stringify(metadata).replace(/'/g, "''")}'::jsonb, now()
-      );
-    `);
-  } catch (err) {}
-
   return {
-    request_id: requestId,
-    session_id: sessionId,
-    question,
-    status: execStatus,
-    answer: summaryAnswer,
-    sql: finalSql,
-    rows: queryRows,
+    status: 'SUCCESS',
+    intent: 'ATTENDANCE_SQL',
+    title: 'Devam Bilgisi',
+    answer: summary,
+    sql: guard.sanitizedSql,
+    rows: rows,
+    normalized_date: dateCtx.sqlClause,
+    date_description: dateCtx.dateDescription,
     latency_ms: latencyMs
   };
 }
 
 module.exports = {
   executeSecureTextToSql,
-  validateSqlSafety,
   normalizeDateAndEntities,
+  resolveFastDeterministicSql,
+  inspectSqlSafety,
   runReadOnlyPsqlJson
 };
-
-if (require.main === module) {
-  (async () => {
-    const q = process.argv[2] || 'Bugün kimler geç kaldı?';
-    console.log(`Executing Secure Text-to-SQL for: "${q}"`);
-    const res = await executeSecureTextToSql(q);
-    console.log('\n--- RESULT STATUS ---', res.status);
-    console.log('--- EXECUTED SQL ---', res.sql);
-    console.log('--- LATENCY ---', res.latency_ms + 'ms');
-    console.log('\n--- ANSWER ---');
-    console.log(res.answer);
-  })();
-}

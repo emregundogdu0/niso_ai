@@ -467,6 +467,25 @@ async function ingestCommonMail(rawMsg) {
   `;
   const existingProviderDup = runAdminPsqlJson(providerDupSql);
   if (existingProviderDup.length > 0) {
+    const existing = existingProviderDup[0];
+    const dupAuditInsert = `
+      INSERT INTO mail.ingestion_event (
+        id, provider, mailbox_address, provider_message_id, provider_thread_id,
+        internet_message_id, from_address, to_addresses, cc_addresses, subject,
+        received_at, delivery_mode, is_business_related, classification,
+        classification_confidence, decision, reason, content_hash, metadata, processed_at
+      ) VALUES (
+        '${eventId}', '${provider}', '${mailboxAddress.replace(/'/g, "''")}', '${providerMsgId.replace(/'/g, "''")}_dup',
+        ${rawMsg.provider_thread_id ? `'${rawMsg.provider_thread_id.replace(/'/g, "''")}'` : 'NULL'},
+        ${internetMsgId ? `'${internetMsgId.replace(/'/g, "''")}'` : 'NULL'},
+        '${fromAddr.replace(/'/g, "''")}', '${JSON.stringify(toList)}'::jsonb, '${JSON.stringify(ccList)}'::jsonb,
+        '${subject.replace(/'/g, "''")}', '${receivedAt}', 'DUPLICATE_ATTEMPT', false, 'DUPLICATE',
+        1.000, 'DUPLICATE', 'Sağlayıcı mesaj ID zaten işlenmiş (Önceki kayıt ID: ${existing.id})',
+        '${crypto.createHash('sha256').update(subject + fromAddr, 'utf8').digest('hex')}', '{}'::jsonb, now()
+      );
+    `;
+    try { runAdminPsql(dupAuditInsert); } catch (e) {}
+
     return {
       id: eventId,
       provider,
@@ -603,12 +622,13 @@ async function ingestCommonMail(rawMsg) {
     const tokenEst = Math.round(chunkText.length / 4);
 
     const insertChunkSql = `
-      INSERT INTO rag.document_chunk (
-        document_id, chunk_index, chunk_content, token_estimate,
-        embedding, metadata, created_at
+      INSERT INTO rag.chunk (
+        document_id, chunk_index, content, token_count,
+        embedding_model, embedding_dimension, embedding, metadata, created_at
       ) VALUES (
-        '${docId}', 1, '${chunkText.replace(/'/g, "''")}', ${tokenEst},
-        '[${embedding.join(',')}]'::vector, '${JSON.stringify({ project_code: projectCode }).replace(/'/g, "''")}'::jsonb, now()
+        '${docId}', 0, '${chunkText.replace(/'/g, "''")}', ${tokenEst},
+        '${EMBEDDING_MODEL}', 1024, '[${embedding.join(',')}]'::vector,
+        '${JSON.stringify({ project_code: projectCode }).replace(/'/g, "''")}'::jsonb, now()
       );
     `;
     runAdminPsql(insertChunkSql);

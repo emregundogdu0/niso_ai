@@ -1,0 +1,169 @@
+{
+  "updatedAt": "2026-09-01T13:08:23.786Z",
+  "createdAt": "2026-09-01T13:08:23.786Z",
+  "id": "bJRrrCOUj49lpQ3D",
+  "name": "12_Global_Error_Handler",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const errData = $input.first().json;\n\nconst errMessage = errData.execution?.error?.message || errData.message || 'Bilinmeyen sistem hatası';\nconst nodeName = errData.execution?.lastNodeExecuted || 'Genel';\n\nlet errorCategory = 'INTERNAL_ERROR';\nlet userMessage = 'İşleminiz gerçekleştirilirken bir sistem hatası oluştu. Lütfen tekrar deneyin.';\nlet severity = 'ERROR';\n\nconst errLower = errMessage.toLowerCase();\nif (errLower.includes('ollama') || errLower.includes('econnrefused') || errLower.includes('11434')) {\n  errorCategory = 'OLLAMA_UNAVAILABLE';\n  userMessage = 'Yapay zeka modeli şu anda yanıt vermiyor. Sistem yöneticisiyle iletişime geçiniz.';\n  severity = 'CRITICAL';\n} else if (errLower.includes('postgres') || errLower.includes('5432') || errLower.includes('timeout')) {\n  errorCategory = 'POSTGRES_CONNECTION_ERROR';\n  userMessage = 'Veritabanı bağlantısında geçici bir gecikme yaşandı. Lütfen biraz sonra tekrar deneyiniz.';\n  severity = 'HIGH';\n} else if (errLower.includes('guard') || errLower.includes('blocked') || errLower.includes('security')) {\n  errorCategory = 'SQL_GUARD_REJECTION';\n  userMessage = 'Güvenlik ilkeleri gereği bu istek reddedilmiştir.';\n  severity = 'WARNING';\n}\n\nreturn [{\n  json: {\n    error_category: errorCategory,\n    severity: severity,\n    node_name: nodeName,\n    user_message: userMessage,\n    internal_error: errMessage,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "categorize-error",
+      "name": "Categorize & Sanitize Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit.security_event (\n  event_id, event_type, severity, route, description, action_taken, created_at\n) VALUES (\n  gen_random_uuid(), $1, $2, $3, $4, 'BLOCKED_AND_USER_NOTIFIED', now()\n)\nRETURNING event_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.error_category,\n  $json.severity,\n  $json.node_name,\n  $json.internal_error\n] }}"
+        }
+      },
+      "id": "audit-security-event",
+      "name": "Audit Security Event in Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "success",
+              "type": "booleanValue",
+              "booleanValue": false
+            },
+            {
+              "name": "error_category",
+              "type": "stringValue",
+              "stringValue": "={{ $('Categorize & Sanitize Error').first().json.error_category }}"
+            },
+            {
+              "name": "message",
+              "type": "stringValue",
+              "stringValue": "={{ $('Categorize & Sanitize Error').first().json.user_message }}"
+            },
+            {
+              "name": "timestamp",
+              "type": "stringValue",
+              "stringValue": "={{ $('Categorize & Sanitize Error').first().json.timestamp }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "format-error-response",
+      "name": "Format Safe User Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        950,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Categorize & Sanitize Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Categorize & Sanitize Error": {
+      "main": [
+        [
+          {
+            "node": "Audit Security Event in Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Security Event in Postgres": {
+      "main": [
+        [
+          {
+            "node": "Format Safe User Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "4932cb2b-4443-49da-8aae-bbaab4717219",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.787Z",
+      "createdAt": "2026-09-01T13:08:23.787Z",
+      "role": "workflow:owner",
+      "workflowId": "bJRrrCOUj49lpQ3D",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

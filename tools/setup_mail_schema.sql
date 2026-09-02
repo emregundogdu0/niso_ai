@@ -76,17 +76,19 @@ CREATE INDEX IF NOT EXISTS idx_rag_document_project_code ON rag.document(project
 CREATE INDEX IF NOT EXISTS idx_rag_document_source_type ON rag.document(source_type);
 CREATE INDEX IF NOT EXISTS idx_rag_document_content_hash ON rag.document(content_hash);
 
--- 4. RAG Document Chunks with PGVector
-CREATE TABLE IF NOT EXISTS rag.document_chunk (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  document_id uuid REFERENCES rag.document(id) ON DELETE CASCADE,
-  chunk_index integer NOT NULL,
-  chunk_content text NOT NULL,
-  token_estimate integer NOT NULL,
+-- 4. RAG Document Chunks with PGVector (Standard rag.chunk Table)
+CREATE TABLE IF NOT EXISTS rag.chunk (
+  id bigserial PRIMARY KEY,
+  document_id uuid NOT NULL REFERENCES rag.document(id) ON DELETE CASCADE,
+  chunk_index integer NOT NULL DEFAULT 0,
+  content text NOT NULL,
+  token_count integer NOT NULL DEFAULT 0,
+  embedding_model text NOT NULL DEFAULT 'qwen3-embedding:0.6b',
+  embedding_dimension integer NOT NULL DEFAULT 1024,
   embedding vector(1024) NOT NULL,
   metadata jsonb DEFAULT '{}'::jsonb,
   created_at timestamptz DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_rag_chunk_embedding ON rag.document_chunk USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX IF NOT EXISTS idx_rag_chunk_document_id ON rag.document_chunk(document_id);
+CREATE INDEX IF NOT EXISTS idx_rag_chunk_embedding_hnsw ON rag.chunk USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_rag_chunk_document_id ON rag.chunk(document_id);

@@ -1,522 +1,630 @@
-[
-  {
-    "id": "chatIntentRouter06",
-    "name": "06_Chat_Intent_Router",
-    "active": false,
-    "isArchived": false,
-    "nodes": [
-      {
-        "parameters": {
-          "options": {
-            "title": "Yönetim Bilgi Asistanı",
-            "subtitle": "İK Politikaları, Devam Takibi ve Proje İletişimi",
-            "initialMessages": "Merhaba! Ben Yönetim Bilgi Asistanınız. Şirket İK politikaları, çalışan devam/devamsızlık durumu ve proje yazışmaları konusunda size yardımcı olabilirim. Nasıl yardımcı olabilirim?",
-            "starterPrompts": [
-              "Yıllık izin hakkım ne zaman başlar?",
-              "Bugün kimler geç kaldı?",
-              "TEMSA projesinde son durum nedir?",
-              "TEMSA ekibi bugün geç kaldı mı ve proje durumu nedir?"
-            ],
-            "allowFileUploads": false
-          }
-        },
-        "type": "@n8n/n8n-nodes-langchain.chatTrigger",
-        "typeVersion": 1.1,
-        "position": [
-          0,
-          0
-        ],
-        "id": "b1111111-1111-4111-8111-111111111111",
-        "name": "Chat Trigger",
-        "webhookId": "management-ai-chat-intent-router"
+{
+  "id": "m3C576WsNJ765h0S",
+  "name": "06_Chat_Intent_Router",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat-router",
+        "responseMode": "responseNode",
+        "options": {}
       },
-      {
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "language": "javaScript",
-          "jsCode": "const item = $input.first()?.json || {};\nconst rawMessage = String(item.chatInput || item.message || item.text || '').trim();\nconst sessionId = String(item.sessionId || 'session_' + Date.now());\nconst startTime = Date.now();\n\nif (rawMessage.length === 0) {\n  return [{\n    json: {\n      passed: false,\n      reason: 'EMPTY_INPUT',\n      session_id: sessionId,\n      question: '',\n      intent: 'UNKNOWN',\n      confidence: 0.0,\n      status: 'GUARD_REJECTED',\n      response_text: 'Lütfen bir soru veya mesaj yazınız.',\n      start_time: startTime,\n      needs_fresh_data: false,\n      entities: {},\n      injection_suspected: false\n    }\n  }];\n}\n\nif (rawMessage.length > 2000) {\n  return [{\n    json: {\n      passed: false,\n      reason: 'EXCESSIVE_LENGTH',\n      session_id: sessionId,\n      question: rawMessage.substring(0, 2000),\n      intent: 'UNKNOWN',\n      confidence: 0.0,\n      status: 'GUARD_REJECTED',\n      response_text: 'Mesajınız çok uzun. Lütfen sorunuzu 2000 karakterden kısa olacak şekilde iletiniz.',\n      start_time: startTime,\n      needs_fresh_data: false,\n      entities: {},\n      injection_suspected: false\n    }\n  }];\n}\n\nconst injectionPatterns = [\n  /ignore (all )?previous instructions/i,\n  /system prompt/i,\n  /jailbreak/i,\n  /dan mode/i,\n  /drop table/i,\n  /eval\\(/i,\n  /exec\\(/i\n];\nconst injectionSuspected = injectionPatterns.some(p => p.test(rawMessage));\n\nreturn [{\n  json: {\n    passed: true,\n    session_id: sessionId,\n    question: rawMessage,\n    start_time: startTime,\n    injection_suspected: injectionSuspected\n  }\n}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          260,
-          0
-        ],
-        "id": "b2222222-2222-4222-8222-222222222222",
-        "name": "Input Normalization & Guard"
+      "id": "webhook-trigger-06",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        100,
+        200
+      ],
+      "webhookId": "chat-router",
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "options": {}
       },
-      {
-        "parameters": {
-          "method": "POST",
-          "url": "http://host.docker.internal:11434/api/chat",
-          "sendBody": true,
-          "specifyBody": "json",
-          "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Sen bir Yönetim ve İK Bilgi Asistanı Niyet Sınıflandırıcısısın (Intent Router).\\nGörevin kullanıcı sorusunu 6 niyetten birine sınıflandırmak ve JSON döndürmektir:\\n\\nINTENTLER:\\n1. HR_POLICY: Şirket içi İK politikaları, izinler, mesai/çalışma saatleri kuralları, dress code, yan haklar, bordro, İSG, istifa ve etik kurallar.\\n2. ATTENDANCE_SQL: Fiili giriş-çıkış saatleri, geç kalma, bugün kimler geldi/gelmedi, devamsızlık listesi, yoklama, turnike kayıtları, mesai çizelgesi.\\n3. COMPANY_TECH_KNOWLEDGE: NISO ve Eldor kurumsal bilgileri, Vortex AI Engine donanım/yazılım özellikleri, otomotiv yazılımları (AUTOSAR, ISO 26262, ADAS), Eldor fabrikaları, Ar-Ge merkezleri, kurumsal sertifikalar, ekip ve ürünler.\\n4. PROJECT_MAIL: Proje durumu, teslimat takvimi, paydaş/müşteri e-posta yazışmaları, toplantı notları, proje e-postaları.\\n5. HYBRID: Birden fazla alanı birleştiren karmaşık sorular (ör. devam durumu + proje maili, veya İK kuralı + proje durumu).\\n6. UNKNOWN: Şirket yönetimi, İK, devam, kurumsal bilgi veya proje dışındaki konular (selamlaşma, şiir yazma, hava durumu, genel bilgi, felsefe, kod yazma vb.).\\n\\nSADECE aşağıdaki JSON formatında geçerli bir JSON döndür:\\n{\\n  \\\"intent\\\": \\\"HR_POLICY\\\" | \\\"ATTENDANCE_SQL\\\" | \\\"COMPANY_TECH_KNOWLEDGE\\\" | \\\"PROJECT_MAIL\\\" | \\\"HYBRID\\\" | \\\"UNKNOWN\\\",\\n  \\\"confidence\\\": 0.95,\\n  \\\"normalized_question\\\": \\\"...\\\",\\n  \\\"entities\\\": {\\n    \\\"date_range\\\": null,\\n    \\\"employee\\\": null,\\n    \\\"department\\\": null,\\n    \\\"project\\\": null\\n  },\\n  \\\"needs_fresh_data\\\": true | false,\\n  \\\"reason\\\": \\\"Sınıflandırma gerekçesi\\\"\\n}\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": $json.question\n    }\n  ],\n  \"stream\": false,\n  \"format\": \"json\",\n  \"options\": {\n    \"temperature\": 0.0\n  }\n}",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          520,
-          0
-        ],
-        "id": "b3333333-3333-4333-8333-333333333333",
-        "name": "Qwen3.5-9B Intent Classifier"
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        100,
+        400
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst item = $input.first().json;\nconst message = item.chatInput || item.message || item.text || item.question || item.body?.message || '';\nconst raw = String(message || '').trim();\nconst sessionId = item.sessionId || item.body?.session_id || ('session_' + Date.now());\n\nfunction generateUuidV4() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\nconst requestId = item.requestId || item.body?.request_id || generateUuidV4();\n\nfunction normalizeTurkish(str) {\n  if (!str) return '';\n  return str\n    .replace(/İ/g, 'i')\n    .replace(/I/g, 'i')\n    .replace(/ı/g, 'i')\n    .replace(/ç/g, 'c')\n    .replace(/Ç/g, 'c')\n    .replace(/ğ/g, 'g')\n    .replace(/Ğ/g, 'g')\n    .replace(/ö/g, 'o')\n    .replace(/Ö/g, 'o')\n    .replace(/ş/g, 's')\n    .replace(/Ş/g, 's')\n    .replace(/ü/g, 'u')\n    .replace(/Ü/g, 'u')\n    .toLowerCase()\n    .replace(/[.,\\/#!$%\\^&\\*;:{}=\\-_'~()?'\"\\+]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nif (!raw) {\n  return [{\n    json: {\n      is_deterministic: true,\n      intent: 'UNKNOWN',\n      title: 'Açıklama Gerekli',\n      answer: 'Lütfen yanıtlayabileceğim bir soru veya mesaj yazınız.',\n      confidence: 1.0,\n      route_used: 'EMPTY_INPUT',\n      retrieval_used: false,\n      sources: [],\n      raw_message: raw,\n      question: raw,\n      session_id: sessionId,\n      request_id: requestId\n    }\n  }];\n}\n\nconst norm = normalizeTurkish(raw);\n\n// 1. Security / Jailbreak / Malicious attack\nconst securityPatterns = [\n  'veritabanini sil', 'tablolari sil', 'drop table', 'delete from', 'truncate table',\n  'sifreleri goster', 'sifreleri listele', 'credentiallari goster', 'sistem promptunu goster',\n  'onceki talimatlari unut', 'ignore previous instructions', 'butun kisisel verilerini dondur',\n  'calisanlarin butun kisisel verilerini'\n];\nif (securityPatterns.some(p => norm.includes(p))) {\n  return [{\n    json: {\n      is_deterministic: true,\n      intent: 'SECURITY_REJECTED',\n      title: 'Güvenli Ret',\n      answer: 'Bu isteği güvenlik ve yetkilendirme kuralları nedeniyle gerçekleştiremiyorum.',\n      confidence: 1.0,\n      route_used: 'SECURITY_GUARD',\n      retrieval_used: false,\n      sources: [],\n      raw_message: raw,\n      question: raw,\n      session_id: sessionId,\n      request_id: requestId\n    }\n  }];\n}\n\n// 2. Pure Small Talk\nconst greetings = ['merhaba', 'merhabalar', 'selam', 'selamlar', 'gunaydin', 'iyi gunler', 'iyi aksamlar', 'iyi geceler', 'hey', 'hi', 'hello', 'slm', 'mrb'];\nconst pleasantries = ['nasilsin', 'nasil gidiyor', 'ne haber', 'naber', 'iyi misin', 'ne yapiyorsun', 'napiyorsun', 'keyifler nasil', 'selam nasilsin', 'merhaba nasilsin'];\nconst thanks = ['tesekkurler', 'tesekkur ederim', 'sag ol', 'sagol', 'eyvallah', 'tamamdir', 'tamam'];\nconst farewells = ['gorusuruz', 'hosca kal', 'hoscakal', 'kendine iyi bak', 'bay bay', 'bye'];\nconst allSmallTalk = [...greetings, ...pleasantries, ...thanks, ...farewells];\n\nif (allSmallTalk.includes(norm)) {\n  let ans = 'Merhaba! Size nasıl yardımcı olabilirim? İK politikaları, devam bilgileri veya proje güncellemeleri hakkında soru sorabilirsiniz.';\n  if (pleasantries.includes(norm)) {\n    ans = 'İyiyim, teşekkür ederim. Size nasıl yardımcı olabilirim? İK politikaları, devam bilgileri veya proje güncellemeleri hakkında soru sorabilirsiniz.';\n  } else if (thanks.includes(norm)) {\n    ans = 'Rica ederim. Başka bir konuda yardımcı olabilir miyim?';\n  } else if (farewells.includes(norm)) {\n    ans = 'Görüşmek üzere, iyi günler dilerim.';\n  }\n  return [{\n    json: {\n      is_deterministic: true,\n      intent: 'SMALL_TALK',\n      title: 'Asistan',\n      answer: ans,\n      confidence: 1.0,\n      route_used: 'SMALL_TALK_LOCAL',\n      retrieval_used: false,\n      sources: [],\n      raw_message: raw,\n      question: raw,\n      session_id: sessionId,\n      request_id: requestId\n    }\n  }];\n}\n\n// 3. Help Detection\nconst helpPatterns = ['neler yapabilirsin', 'neler yapabiliyorsun', 'nasil kullanilir', 'bana nasil yardimci olabilirsin', 'hangi sorulari sorabilirim', 'ozelliklerin neler', 'yardim', 'help', 'yardim eder misin', 'yardimci olabilir misin'];\nif (helpPatterns.includes(norm)) {\n  return [{\n    json: {\n      is_deterministic: true,\n      intent: 'HELP',\n      title: 'Yardım',\n      answer: '### Yönetim Bilgi Asistanı Yetenekleri\\n\\n- **İK Politikaları:** Çalışma saatleri, giriş toleransı, yıllık izin hak edişi, dress code ve şirket kuralları.\\n- **Devam ve Puantaj Bilgisi (SQL):** Bugün veya belirli tarihlerde geç kalanlar, zamanında gelenler, mesaide olanlar.\\n- **Proje E-posta Güncellemeleri (RAG):** TEMSA, VORTEX ve diğer projelere ait e-posta akışları, sprint durumları ve teslim tarihleri.\\n- **Hibrit Analiz:** Devam verileri ile proje e-postalarını birleştiren çok kaynaklı korelasyon analizleri.',\n      confidence: 1.0,\n      route_used: 'HELP_LOCAL',\n      retrieval_used: false,\n      sources: [],\n      raw_message: raw,\n      question: raw,\n      session_id: sessionId,\n      request_id: requestId\n    }\n  }];\n}\n\n// 4. Strip leading greetings/fillers to extract the core question\nlet stripped = norm;\nfor (const g of greetings) {\n  if (stripped.startsWith(g + ' ')) {\n    stripped = stripped.substring(g.length).trim();\n    break;\n  }\n}\n\nconst attendanceKeywords = ['gec kaldi', 'gec kalan', 'mesaide', 'ise geldi', 'zamaninda gelen', 'izinli', 'uzaktan calisan', 'kac kisi', 'puantaj', 'gecikme'];\nconst hrKeywords = ['calisma saatleri', 'calisma saati', 'dress code', 'kiyafet', 'dogum izni', 'yillik izin', 'yemek yardim', 'yol yardim', 'deneme suresi', 'prim politikasi', 'resmi tatiller'];\nconst projectKeywords = ['temsa', 'vortex', 'eldor obc', 'smart factory', 'bms', 'ecu', 'proje e posta', 'proje guncelleme', 'proje'];\nconst companyKeywords = ['niso ne is yapar', 'sirket hangi hizmetleri', 'fabrikanin adresi', 'faaliyet alanlari'];\n\nconst hasAttendance = attendanceKeywords.some(k => stripped.includes(k));\nconst hasHr = hrKeywords.some(k => stripped.includes(k));\nconst hasProject = projectKeywords.some(k => stripped.includes(k));\nconst hasCompany = companyKeywords.some(k => stripped.includes(k));\n\nif (hasProject && (hasAttendance || (stripped.includes('risk') && stripped.includes('gecikme')))) {\n  return [{ json: { is_deterministic: true, intent: 'HYBRID', question: raw, confidence: 0.98, raw_message: raw, session_id: sessionId, request_id: requestId } }];\n}\nif (hasAttendance) {\n  return [{ json: { is_deterministic: true, intent: 'ATTENDANCE_SQL', question: raw, confidence: 0.98, raw_message: raw, session_id: sessionId, request_id: requestId } }];\n}\nif (hasHr) {\n  return [{ json: { is_deterministic: true, intent: 'HR_POLICY', question: raw, confidence: 0.98, raw_message: raw, session_id: sessionId, request_id: requestId } }];\n}\nif (hasProject) {\n  return [{ json: { is_deterministic: true, intent: 'PROJECT_MAIL', question: raw, confidence: 0.95, raw_message: raw, session_id: sessionId, request_id: requestId } }];\n}\nif (hasCompany) {\n  return [{ json: { is_deterministic: true, intent: 'COMPANY_KNOWLEDGE', question: raw, confidence: 0.95, raw_message: raw, session_id: sessionId, request_id: requestId } }];\n}\n\n// 5. Unknown out-of-domain heuristics\nconst unknownPatterns = ['siir yaz', 'hava nasil', 'yemek tarifi', 'sacma bir sey', 'xyzabc', 'fikra anlat', 'sarki soyle'];\nif (unknownPatterns.some(p => norm.includes(p))) {\n  return [{\n    json: {\n      is_deterministic: true,\n      intent: 'UNKNOWN',\n      title: 'Açıklama Gerekli',\n      answer: 'Bu isteğin hangi bilgi alanıyla ilgili olduğunu netleştiremedim. İK politikası, devam bilgisi veya proje güncellemesi olarak biraz daha açık sorabilir misiniz?',\n      confidence: 0.99,\n      route_used: 'UNKNOWN',\n      retrieval_used: false,\n      sources: [],\n      raw_message: raw,\n      question: raw,\n      session_id: sessionId,\n      request_id: requestId\n    }\n  }];\n}\n\n// Non-deterministic: send to LLM\nreturn [{\n  json: {\n    is_deterministic: false,\n    question: raw,\n    raw_message: raw,\n    session_id: sessionId,\n    request_id: requestId\n  }\n}];\n"
       },
-      {
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "language": "javaScript",
-          "jsCode": "const guard = $('Input Normalization & Guard').first().json;\n\nif (!guard.passed) {\n  return [{\n    json: {\n      session_id: guard.session_id,\n      question: guard.question,\n      intent: 'UNKNOWN',\n      confidence: 0.0,\n      status: 'GUARD_REJECTED',\n      response_text: guard.response_text,\n      latency_ms: Date.now() - guard.start_time,\n      metadata: { rejection_reason: guard.reason }\n    }\n  }];\n}\n\nconst httpResponse = $input.first().json;\nconst rawContent = httpResponse.message?.content || httpResponse.response || '';\n\nlet parsed = null;\ntry {\n  let clean = rawContent.replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();\n  clean = clean.replace(/^```json\\s*/i, '').replace(/^```\\s*/, '').replace(/```\\s*$/, '').trim();\n  const firstB = clean.indexOf('{');\n  const lastB = clean.lastIndexOf('}');\n  if (firstB !== -1 && lastB !== -1 && lastB > firstB) {\n    clean = clean.substring(firstB, lastB + 1);\n  }\n  parsed = JSON.parse(clean);\n} catch (e) {\n  parsed = {\n    intent: 'UNKNOWN',\n    confidence: 0.0,\n    normalized_question: guard.question,\n    entities: {},\n    needs_fresh_data: false,\n    reason: 'JSON parse error: ' + e.message\n  };\n}\n\nconst validIntents = ['HR_POLICY', 'ATTENDANCE_SQL', 'COMPANY_TECH_KNOWLEDGE', 'PROJECT_MAIL', 'HYBRID', 'UNKNOWN'];\nlet intent = validIntents.includes(parsed.intent) ? parsed.intent : 'UNKNOWN';\nlet confidence = typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0.5;\nlet status = 'SUCCESS';\nlet responseText = '';\n\nif (confidence < 0.75 && intent !== 'UNKNOWN') {\n  status = 'LOW_CONFIDENCE';\n  intent = 'UNKNOWN';\n  responseText = `Sorunuz tam anlaşılamadı (Güven: %${Math.round(confidence * 100)}). Lütfen şirket politikaları, devam durumu, kurumsal bilgiler veya proje yazışmalarıyla ilgili daha net bir soru belirtiniz.`;\n} else {\n  switch (intent) {\n    case 'HR_POLICY':\n      responseText = 'HR_POLICY route selected.';\n      break;\n    case 'ATTENDANCE_SQL':\n      responseText = 'ATTENDANCE_SQL route selected.';\n      break;\n    case 'COMPANY_TECH_KNOWLEDGE':\n      responseText = 'COMPANY_TECH_KNOWLEDGE route selected.';\n      break;\n    case 'PROJECT_MAIL':\n      responseText = 'PROJECT_MAIL route selected.';\n      break;\n    case 'HYBRID':\n      responseText = 'HYBRID route selected.';\n      break;\n    case 'UNKNOWN':\n    default:\n      responseText = 'UNKNOWN route selected.';\n      break;\n  }\n}\n\nconst latencyMs = Date.now() - guard.start_time;\n\nreturn [{\n  json: {\n    session_id: guard.session_id,\n    question: guard.question,\n    intent,\n    confidence,\n    status,\n    normalized_question: parsed.normalized_question || guard.question,\n    entities: parsed.entities || {},\n    needs_fresh_data: Boolean(parsed.needs_fresh_data),\n    reason: parsed.reason || '',\n    response_text: responseText,\n    latency_ms: latencyMs,\n    metadata: {\n      entities: parsed.entities || {},\n      needs_fresh_data: Boolean(parsed.needs_fresh_data),\n      reason: parsed.reason || '',\n      injection_suspected: guard.injection_suspected || false,\n      model: 'qwen3.5:9b'\n    }\n  }\n}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          780,
-          0
-        ],
-        "id": "b4444444-4444-4444-8444-444444444444",
-        "name": "Structured Output & Confidence Check"
-      },
-      {
-        "parameters": {
-          "rules": {
-            "values": [
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict",
-                    "version": 2
-                  },
-                  "conditions": [
-                    {
-                      "leftValue": "={{ $json.intent }}",
-                      "rightValue": "HR_POLICY",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
+      "id": "pre-router-guard",
+      "name": "Pre-Router Guard & Normalization",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        300
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.is_deterministic }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
                     }
-                  ],
-                  "combinator": "and"
-                }
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict",
-                    "version": 2
-                  },
-                  "conditions": [
-                    {
-                      "leftValue": "={{ $json.intent }}",
-                      "rightValue": "ATTENDANCE_SQL",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ],
-                  "combinator": "and"
-                }
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict",
-                    "version": 2
-                  },
-                  "conditions": [
-                    {
-                      "leftValue": "={{ $json.intent }}",
-                      "rightValue": "PROJECT_MAIL",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ],
-                  "combinator": "and"
-                }
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict",
-                    "version": 2
-                  },
-                  "conditions": [
-                    {
-                      "leftValue": "={{ $json.intent }}",
-                      "rightValue": "HYBRID",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ],
-                  "combinator": "and"
-                }
+                  }
+                ],
+                "combinator": "and"
               }
-            ]
-          },
-          "options": {
-            "fallbackOutput": "extra"
-          }
+            }
+          ]
         },
-        "type": "n8n-nodes-base.switch",
-        "typeVersion": 3.2,
-        "position": [
-          1040,
-          0
-        ],
-        "id": "b5555555-5555-4555-8555-555555555555",
-        "name": "Switch Intent Route"
-      },
-      {
-        "parameters": {
-          "workflowId": {
-            "__rl": true,
-            "value": "hrHybridCagRagAnswer07",
-            "mode": "id"
-          },
-          "workflowInputs": {
-            "mappingMode": "defineBelow",
-            "value": {},
-            "matchingColumns": [],
-            "schema": [],
-            "attemptToConvertTypes": false,
-            "convertFieldsToString": false
-          },
-          "options": {
-            "waitForSubWorkflow": true
-          }
-        },
-        "type": "n8n-nodes-base.executeWorkflow",
-        "typeVersion": 1.2,
-        "position": [
-          1300,
-          -200
-        ],
-        "id": "b6666666-1111-4666-8666-666666666666",
-        "name": "Execute Sub-Workflow HR Hybrid"
-      },
-      {
-        "parameters": {
-          "workflowId": {
-            "__rl": true,
-            "value": "secureTextToSql09",
-            "mode": "id"
-          },
-          "options": {
-            "waitForSubWorkflow": true
-          }
-        },
-        "type": "n8n-nodes-base.executeWorkflow",
-        "typeVersion": 1.2,
-        "position": [
-          1300,
-          -100
-        ],
-        "id": "b6666666-2222-4666-8666-666666666666",
-        "name": "Execute Sub-Workflow Attendance SQL"
-      },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "routed_intent",
-                "type": "stringValue",
-                "stringValue": "PROJECT_MAIL"
-              }
-            ]
-          },
-          "include": "all",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1300,
-          0
-        ],
-        "id": "b6666666-3333-4666-8666-666666666666",
-        "name": "Project Mail Placeholder"
-      },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "routed_intent",
-                "type": "stringValue",
-                "stringValue": "HYBRID"
-              }
-            ]
-          },
-          "include": "all",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1300,
-          100
-        ],
-        "id": "b6666666-4444-4666-8666-666666666666",
-        "name": "Hybrid Placeholder"
-      },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "routed_intent",
-                "type": "stringValue",
-                "stringValue": "UNKNOWN"
-              }
-            ]
-          },
-          "include": "all",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1300,
-          200
-        ],
-        "id": "b6666666-5555-4666-8666-666666666666",
-        "name": "Unknown / Fallback Placeholder"
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "INSERT INTO audit.chat_request (\n  request_id, session_id, question, intent,\n  confidence, status, latency_ms, metadata, created_at\n) VALUES (\n  gen_random_uuid(),\n  $1::text,\n  $2::text,\n  $3::text,\n  $4::numeric,\n  $5::text,\n  $6::int,\n  $7::jsonb,\n  now()\n)\nRETURNING request_id, created_at;",
-          "options": {
-            "queryReplacement": "={{ [ $json.session_id, $json.question, $json.intent, $json.confidence, $json.status, $json.latency_ms, JSON.stringify($json.metadata) ] }}"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          1580,
-          0
-        ],
-        "id": "b7777777-7777-4777-8777-777777777777",
-        "name": "Audit Log to Postgres",
-        "credentials": {
-          "postgres": {
-            "id": "postgresManagementAi01",
-            "name": "PostgreSQL Management AI"
-          }
+        "options": {
+          "fallbackOutput": "extra"
         }
       },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "response",
-                "type": "stringValue",
-                "stringValue": "={{ $('Structured Output & Confidence Check').item.json.response_text }}"
-              },
-              {
-                "name": "intent",
-                "type": "stringValue",
-                "stringValue": "={{ $('Structured Output & Confidence Check').item.json.intent }}"
-              },
-              {
-                "name": "confidence",
-                "type": "numberValue",
-                "numberValue": "={{ $('Structured Output & Confidence Check').item.json.confidence }}"
-              },
-              {
-                "name": "session_id",
-                "type": "stringValue",
-                "stringValue": "={{ $('Structured Output & Confidence Check').item.json.session_id }}"
-              }
-            ]
-          },
-          "include": "none",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1840,
-          0
-        ],
-        "id": "b8888888-8888-4888-8888-888888888888",
-        "name": "Respond to User"
-      }
-    ],
-    "connections": {
-      "Chat Trigger": {
-        "main": [
-          [
-            {
-              "node": "Input Normalization & Guard",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Input Normalization & Guard": {
-        "main": [
-          [
-            {
-              "node": "Qwen3.5-9B Intent Classifier",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Qwen3.5-9B Intent Classifier": {
-        "main": [
-          [
-            {
-              "node": "Structured Output & Confidence Check",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Structured Output & Confidence Check": {
-        "main": [
-          [
-            {
-              "node": "Switch Intent Route",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Switch Intent Route": {
-        "main": [
-          [
-            {
-              "node": "HR Route Placeholder",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Execute Sub-Workflow Attendance SQL",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Project Mail Placeholder",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Hybrid Placeholder",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Unknown / Fallback Placeholder",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Execute Sub-Workflow HR Hybrid": {
-        "main": [
-          [
-            {
-              "node": "Audit Log to Postgres",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Execute Sub-Workflow Attendance SQL": {
-        "main": [
-          [
-            {
-              "node": "Audit Log to Postgres",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Project Mail Placeholder": {
-        "main": [
-          [
-            {
-              "node": "Audit Log to Postgres",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Hybrid Placeholder": {
-        "main": [
-          [
-            {
-              "node": "Audit Log to Postgres",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Unknown / Fallback Placeholder": {
-        "main": [
-          [
-            {
-              "node": "Audit Log to Postgres",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Audit Log to Postgres": {
-        "main": [
-          [
-            {
-              "node": "Respond to User",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      }
+      "id": "switch-deterministic",
+      "name": "Check Deterministic Match",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        580,
+        300
+      ],
+      "disabled": false
     },
-    "settings": {
-      "executionOrder": "v1"
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"prompt\": {{ JSON.stringify(\"Sen bir yönetim asistanı niyet sınıflandırıcısısın. Kullanıcı mesajını şu kategorilerden birine ata: HR_POLICY, ATTENDANCE_SQL, COMPANY_KNOWLEDGE, PROJECT_MAIL, HYBRID, SMALL_TALK, HELP, UNKNOWN, SECURITY_REJECTED.\\n\\nKategoriler:\\n- HR_POLICY: Şirket İK politikaları, izin hakları, kıyafet kuralı, yemek/servis yardımı, deneme süresi, bordro.\\n- ATTENDANCE_SQL: Bugün/belirli tarihte kimler geldi, geç kaldı, fabrikada, izinli veya uzaktan çalışıyor.\\n- COMPANY_KNOWLEDGE: Şirket nedir, NISO/Eldor faaliyet alanları, fabrika adresi.\\n- PROJECT_MAIL: TEMSA, Vortex, Eldor OBC, Smart Factory gibi projelerin e-postaları, sprint durumu, teknik blokajlar, teslim tarihleri.\\n- HYBRID: Hem puantaj/katılım hem de proje/aksiyon konularını birlikte soran sorular.\\n- SMALL_TALK: Selamlaşma, hâl hatır sorma, teşekkür, vedalaşma.\\n- HELP: Sistemin yetenekleri ve nasıl kullanılacağı hakkında sorular.\\n- UNKNOWN: Şiir, hava durumu, yemek tarifi veya şirketle alakasız konular.\\n\\nSADECE JSON döndür: {\\\"intent\\\": \\\"...\\\", \\\"confidence\\\": 0.95}\\n\\nMESAJ: \" + $json.question + \"\\n\\nJSON:\") }},\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.1\n  }\n}",
+        "options": {}
+      },
+      "id": "intent-classifier",
+      "name": "Qwen3.5-9B Intent Classifier",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        450
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst guardItem = $('Pre-Router Guard & Normalization').first().json;\nconst llmRes = $input.first()?.json || {};\nconst rawText = llmRes.response || '{}';\n\nlet parsed = {};\ntry {\n  const jsonMatch = rawText.match(/\\{[\\s\\S]*?\\}/);\n  if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);\n} catch (e) {}\n\nlet intent = String(parsed.intent || 'UNKNOWN').toUpperCase();\nlet confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0.0;\n\nconst validIntents = ['HR_POLICY', 'ATTENDANCE_SQL', 'COMPANY_KNOWLEDGE', 'PROJECT_MAIL', 'HYBRID', 'SMALL_TALK', 'HELP', 'UNKNOWN', 'SECURITY_REJECTED'];\nif (!validIntents.includes(intent)) {\n  intent = 'UNKNOWN';\n}\n\nif (confidence < 0.75) {\n  intent = 'UNKNOWN';\n}\n\nlet answer = '';\nlet title = '';\nlet routeUsed = intent;\n\nif (intent === 'UNKNOWN') {\n  title = 'Açıklama Gerekli';\n  answer = 'Bu isteğin hangi bilgi alanıyla ilgili olduğunu netleştiremedim. İK politikası, devam bilgisi veya proje güncellemesi olarak biraz daha açık sorabilir misiniz?';\n}\n\nreturn [{\n  json: {\n    is_deterministic: true,\n    intent: intent,\n    title: title,\n    answer: answer,\n    confidence: confidence,\n    route_used: routeUsed,\n    question: guardItem.question || guardItem.raw_message,\n    raw_message: guardItem.raw_message,\n    session_id: guardItem.session_id,\n    request_id: guardItem.request_id,\n    retrieval_used: false,\n    sources: []\n  }\n}];\n"
+      },
+      "id": "post-llm-validator",
+      "name": "Post-LLM Intent Validator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        450
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "HR_POLICY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "ATTENDANCE_SQL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "PROJECT_MAIL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "HYBRID",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "COMPANY_KNOWLEDGE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "switch-main-route",
+      "name": "Switch Main Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1260,
+        300
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "X48s6TzlpKpVNu2w",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/X48s6TzlpKpVNu2w",
+          "cachedResultName": "07_HR_Hybrid_CAG_RAG_Answer"
+        },
+        "workflowInputs": {
+          "mappingMode": "passthrough"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "exec-hr-hybrid",
+      "name": "Execute Sub-Workflow HR Hybrid",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        100
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "DowKEdcS2nQbR1wc",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/DowKEdcS2nQbR1wc",
+          "cachedResultName": "09_Secure_Text_to_SQL"
+        },
+        "workflowInputs": {
+          "mappingMode": "passthrough"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "exec-attendance-sql",
+      "name": "Execute Sub-Workflow Attendance SQL",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        240
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "aopNq0brScuCKrU7",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/aopNq0brScuCKrU7",
+          "cachedResultName": "11_Project_Mail_RAG_Answer"
+        },
+        "workflowInputs": {
+          "mappingMode": "passthrough"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "exec-project-mail-rag",
+      "name": "Execute Sub-Workflow Project Mail RAG",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        380
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "uSevqGz9uojM7OM7",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/uSevqGz9uojM7OM7",
+          "cachedResultName": "11_Hybrid_Evidence_Merger"
+        },
+        "workflowInputs": {
+          "mappingMode": "passthrough"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "exec-hybrid-merger",
+      "name": "Execute Sub-Workflow Hybrid Evidence Merger",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        520
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "BK5fKY49Tezk6hZq",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/BK5fKY49Tezk6hZq",
+          "cachedResultName": "10_Company_Knowledge_RAG_Answer"
+        },
+        "workflowInputs": {
+          "mappingMode": "passthrough"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "exec-company-knowledge",
+      "name": "Execute Sub-Workflow Company Knowledge",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        660
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst item = $input.first().json;\nlet intent = item.intent;\n\nif (!intent) {\n  if (item.route_used === 'CAG_RAG' || item.route_used === 'RAG' || item.route_used === 'CAG' || item.route_used === 'HR_POLICY') {\n    intent = 'HR_POLICY';\n  } else if (item.route_used === 'ATTENDANCE_SQL' || item.sql || item.generated_sql) {\n    intent = 'ATTENDANCE_SQL';\n  } else if (item.route_used === 'PROJECT_MAIL' || item.project_code) {\n    intent = 'PROJECT_MAIL';\n  } else if (item.route_used === 'HYBRID' || item.attendance_evidence || item.mail_evidence) {\n    intent = 'HYBRID';\n  } else if (item.route_used === 'COMPANY_KNOWLEDGE') {\n    intent = 'COMPANY_KNOWLEDGE';\n  } else {\n    intent = 'UNKNOWN';\n  }\n}\n\nlet title = item.title;\nlet answer = item.answer || '';\nlet routeUsed = item.route_used || intent;\nlet sources = item.sources || [];\nlet retrievalUsed = !!item.retrieval_used || (sources.length > 0);\nlet generatedSql = item.sql || item.generated_sql || null;\nlet isSynthetic = item.is_synthetic || false;\nlet syntheticNotice = item.synthetic_notice || null;\n\nif (intent === 'SMALL_TALK') {\n  title = 'Asistan';\n  routeUsed = 'SMALL_TALK_LOCAL';\n  retrievalUsed = false;\n  sources = [];\n} else if (intent === 'HELP') {\n  title = 'Yardım';\n  routeUsed = 'HELP_LOCAL';\n  retrievalUsed = false;\n  sources = [];\n} else if (intent === 'UNKNOWN') {\n  title = 'Açıklama Gerekli';\n  routeUsed = 'UNKNOWN';\n  retrievalUsed = false;\n  sources = [];\n} else if (intent === 'SECURITY_REJECTED') {\n  title = 'Güvenli Ret';\n  routeUsed = 'SECURITY_GUARD';\n  retrievalUsed = false;\n  sources = [];\n} else if (intent === 'HR_POLICY') {\n  title = 'İK Bilgisi';\n  routeUsed = routeUsed || 'HR_POLICY';\n} else if (intent === 'ATTENDANCE_SQL') {\n  title = 'Devam Bilgisi';\n  routeUsed = 'ATTENDANCE_SQL';\n} else if (intent === 'COMPANY_KNOWLEDGE') {\n  title = 'Şirket Bilgisi';\n  routeUsed = 'COMPANY_KNOWLEDGE';\n} else if (intent === 'PROJECT_MAIL') {\n  title = 'Proje E-postası (RAG)';\n  routeUsed = 'PROJECT_MAIL';\n} else if (intent === 'HYBRID') {\n  title = 'Hibrit Analiz';\n  routeUsed = 'HYBRID';\n}\n\nfunction generateUuidV4() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\nreturn [{\n  json: {\n    status: 'SUCCESS',\n    intent: intent,\n    title: title,\n    route_used: routeUsed,\n    answer: answer,\n    sources: sources,\n    source_count: sources.length,\n    generated_sql: generatedSql,\n    retrieval_used: retrievalUsed,\n    is_synthetic: isSynthetic,\n    synthetic_notice: syntheticNotice,\n    request_id: item.request_id || generateUuidV4(),\n    session_id: item.session_id || 'default_session',\n    confidence: item.confidence || 0.95\n  }\n}];\n"
+      },
+      "id": "unified-formatter",
+      "name": "Unified Response Formatter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        300
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2100,
+        200
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit.chat_request (\n  request_id, session_id, question, intent,\n  confidence, status, latency_ms, metadata, created_at\n) VALUES (\n  $1::uuid,\n  $2::text,\n  $3::text,\n  $4::text,\n  $5::numeric,\n  $6::text,\n  $7::int,\n  $8::jsonb,\n  now()\n)\nRETURNING request_id, created_at;",
+        "options": {
+          "queryReplacement": "={{ [ $json.request_id, $json.session_id, $json.answer ? $json.intent : 'EMPTY', $json.intent, $json.confidence, $json.status, 25, JSON.stringify({ route_used: $json.route_used, retrieval_used: $json.retrieval_used, source_count: $json.source_count }) ] }}"
+        }
+      },
+      "id": "audit-postgres",
+      "name": "Audit Log to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2100,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      },
+      "disabled": false
     }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Router Guard & Normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-Router Guard & Normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-Router Guard & Normalization": {
+      "main": [
+        [
+          {
+            "node": "Check Deterministic Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Deterministic Match": {
+      "main": [
+        [
+          {
+            "node": "Switch Main Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Qwen3.5-9B Intent Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen3.5-9B Intent Classifier": {
+      "main": [
+        [
+          {
+            "node": "Post-LLM Intent Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post-LLM Intent Validator": {
+      "main": [
+        [
+          {
+            "node": "Switch Main Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Main Route": {
+      "main": [
+        [
+          {
+            "node": "Execute Sub-Workflow HR Hybrid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Sub-Workflow Attendance SQL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Sub-Workflow Project Mail RAG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Sub-Workflow Hybrid Evidence Merger",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Sub-Workflow Company Knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unified Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-Workflow HR Hybrid": {
+      "main": [
+        [
+          {
+            "node": "Unified Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-Workflow Attendance SQL": {
+      "main": [
+        [
+          {
+            "node": "Unified Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-Workflow Project Mail RAG": {
+      "main": [
+        [
+          {
+            "node": "Unified Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-Workflow Hybrid Evidence Merger": {
+      "main": [
+        [
+          {
+            "node": "Unified Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sub-Workflow Company Knowledge": {
+      "main": [
+        [
+          {
+            "node": "Unified Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unified Response Formatter": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Audit Log to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
   }
-]
+}
