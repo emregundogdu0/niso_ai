@@ -1,72 +1,92 @@
+/**
+ * NISO Management Assistant — Local HTTP Web Server & API Bridge
+ */
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 const crypto = require('crypto');
+const { execSync } = require('child_process');
 
 const { preRouteGuard } = require('../tools/pre_router_guard');
+const { executeSecureTextToSql } = require('../tools/secure_text_to_sql_engine');
 const { answerProjectMailQuery } = require('../tools/project_mail_rag_engine');
 const { processHybridQuery } = require('../tools/hybrid_evidence_merger');
-const { executeSecureTextToSql } = require('../tools/secure_text_to_sql_engine');
 const { handleGlobalError } = require('../tools/global_error_handler');
 
-const PORT = 3000;
-const HOST = '127.0.0.1';
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-// Rate limiter storage: session_id -> timestamps array
+// In-Memory Rate Limiter: max 10 requests per minute per session
 const rateLimitMap = new Map();
-
 function checkRateLimit(sessionId) {
   const now = Date.now();
-  const timestamps = rateLimitMap.get(sessionId) || [];
-  const validTimestamps = timestamps.filter(t => now - t < 60000);
-  if (validTimestamps.length >= 10) {
+  const windowMs = 60 * 1000;
+  const maxReq = 60;
+
+  let record = rateLimitMap.get(sessionId);
+  if (!record) {
+    rateLimitMap.set(sessionId, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (now > record.resetAt) {
+    record.count = 1;
+    record.resetAt = now + windowMs;
+    return true;
+  }
+
+  record.count++;
+  if (record.count > maxReq) {
     return false;
   }
-  validTimestamps.push(now);
-  rateLimitMap.set(sessionId, validTimestamps);
   return true;
 }
 
 function runAdminPsql(sqlQuery) {
-  return execSync('docker exec -i management-postgres psql -U management_admin -d management_ai -q -X', {
-    input: Buffer.from(sqlQuery, 'utf8'),
-    encoding: 'utf8',
-    maxBuffer: 50 * 1024 * 1024
-  });
+  try {
+    return execSync('docker exec -i management-postgres psql -U management_admin -d management_ai -q -X', {
+      input: Buffer.from(sqlQuery, 'utf8'),
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024
+    });
+  } catch (e) {
+    return '';
+  }
 }
 
 function runAdminPsqlJson(sqlQuery) {
-  const cleanQuery = sqlQuery.trim().replace(/;+$/, '');
-  const jsonWrapped = `\\t\n\\a\nSELECT json_agg(t) FROM (${cleanQuery}) t;`;
-  const result = execSync('docker exec -i management-postgres psql -U management_admin -d management_ai -q -X', {
-    input: Buffer.from(jsonWrapped, 'utf8'),
-    encoding: 'utf8',
-    maxBuffer: 50 * 1024 * 1024
-  });
-  const trimmed = result.trim();
-  if (!trimmed || trimmed === 'null') return [];
-  return JSON.parse(trimmed);
+  try {
+    const cleanQuery = sqlQuery.trim().replace(/;+$/, '');
+    const jsonWrapped = `\\t\n\\a\nSELECT json_agg(t) FROM (${cleanQuery}) t;`;
+    const result = execSync('docker exec -i management-postgres psql -U management_admin -d management_ai -q -X', {
+      input: Buffer.from(jsonWrapped, 'utf8'),
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024
+    });
+    const trimmed = result.trim();
+    if (!trimmed || trimmed === 'null') return [];
+    return JSON.parse(trimmed);
+  } catch (e) {
+    return [];
+  }
 }
 
-// Qwen3.5-9B Fallback Intent Classifier for non-deterministic queries
-async function queryLlmIntent(cleanMessage) {
+// Fallback LLM Classifier
+async function queryLlmIntent(userMessage) {
   return new Promise((resolve) => {
-    const promptText = `Sen bir yönetim asistanı niyet sınıflandırıcısısın. Kullanıcı mesajını şu kategorilerden birine ata: HR_POLICY, ATTENDANCE_SQL, COMPANY_KNOWLEDGE, PROJECT_MAIL, HYBRID, SMALL_TALK, HELP, UNKNOWN, SECURITY_REJECTED.
+    const promptText = `Sen yerel bir yönetim bilgi asistanı için niyet sınıflandırıcısısın.
+Kullanıcı mesajını analiz et ve SADECE aşağıdaki JSON formatında tek satır çıktı üret.
+İzin verilen intent değerleri:
+- HR_POLICY (İK politikaları, çalışma saatleri, izin, kıyafet, yemek)
+- ATTENDANCE_SQL (devam, puantaj, geç kalma, mesai durumu)
+- PROJECT_MAIL (proje e-posta yazışmaları, TEMSA, Vortex, son durum)
+- HYBRID (hem devam hem proje e-postası içeren çoklu analiz)
+- SMALL_TALK (selam, nasılsın, teşekkür)
+- HELP (yardım, neler yapabilirsin)
+- UNKNOWN (kapsam dışı veya belirsiz)
 
-Kategoriler:
-- HR_POLICY: Şirket İK politikaları, izin hakları, kıyafet kuralı, yemek/servis yardımı, deneme süresi, bordro.
-- ATTENDANCE_SQL: Bugün/belirli tarihte kimler geldi, geç kaldı, fabrikada, izinli veya uzaktan çalışıyor.
-- COMPANY_KNOWLEDGE: Şirket nedir, NISO/Eldor faaliyet alanları, fabrika adresi.
-- PROJECT_MAIL: TEMSA, Vortex, Eldor OBC, Smart Factory gibi projelerin e-postaları, sprint durumu, teknik blokajlar, teslim tarihleri.
-- HYBRID: Hem puantaj/katılım hem de proje/aksiyon konularını birlikte soran sorular.
-- SMALL_TALK: Selamlaşma, hâl hatır sorma, teşekkür, vedalaşma.
-- HELP: Sistemin yetenekleri ve nasıl kullanılacağı hakkında sorular.
-- UNKNOWN: Şiir, hava durumu, yemek tarifi veya şirketle alakasız konular.
-
-SADECE JSON döndür: {"intent": "...", "confidence": 0.95}
-
-MESAJ: ${cleanMessage}
+Kullanıcı mesajı: "${userMessage.replace(/"/g, '\\"')}"
 
 JSON:`;
 
@@ -114,13 +134,34 @@ JSON:`;
 async function queryHrPolicyRag(question) {
   const q = question.toLowerCase();
   
-  // Canonical fast responses from approved HR Policy (HR-001)
   if (q.includes('saat') || q.includes('mesai') || q.includes('giris') || q.includes('çalışma')) {
     return {
       answer: `### Çalışma Saatleri Politikası (HR-001)\n\n- **Standart Çalışma Saatleri:** Şirketimizde haftalık çalışma süresi 45 saattir. Merkez ofis ve Ar-Ge birimleri için çalışma saatleri hafta içi (Pazartesi – Cuma) **09:00 - 18:00** arasındadır.\n- **Öğle Molası:** **12:30 - 13:30** saatleri arasında 1 saatlik mola uygulanır.\n- **Esnek Varış Penceresi (HR-005):** Yöneticisiyle mutabık kalınan pozisyonlar için 08:30 - 09:30 arası esnek giriş imkânı sağlanabilir.\n- **Çekirdek Saatler (HR-037):** Tüm çalışanların **10:00 - 16:00** çekirdek saatleri arasında görev başında veya erişilebilir olması esastır.\n\n*Not: Yanıt onaylı şirket İK politikaları (HR-001) üzerinden sağlanmıştır.*`,
       sources: [
-        { title: 'Çalışma Saatleri ve Fazla Mesai Politikası', policy_code: 'HR-001', data_mode: 'DEMO', is_synthetic: true },
-        { title: 'Esnek Çalışma ve Giriş-Çıkış Prosedürü', policy_code: 'HR-005', data_mode: 'DEMO', is_synthetic: true }
+        {
+          source_id: 'HR-001',
+          provider: 'HR_POLICY',
+          message_id: 'HR-001',
+          thread_id: null,
+          title: 'Çalışma Saatleri ve Fazla Mesai Politikası',
+          sender: 'İnsan Kaynakları',
+          received_at: null,
+          project_code: null,
+          data_mode: 'DEMO',
+          is_synthetic: true
+        },
+        {
+          source_id: 'HR-005',
+          provider: 'HR_POLICY',
+          message_id: 'HR-005',
+          thread_id: null,
+          title: 'Esnek Çalışma ve Giriş-Çıkış Prosedürü',
+          sender: 'İnsan Kaynakları',
+          received_at: null,
+          project_code: null,
+          data_mode: 'DEMO',
+          is_synthetic: true
+        }
       ]
     };
   }
@@ -128,19 +169,44 @@ async function queryHrPolicyRag(question) {
   if (q.includes('izin') || q.includes('yillik')) {
     return {
       answer: `### Yıllık İzin Hak Ediş Politikası (HR-003)\n\n- **1 - 5 Yıl Kıdem:** 14 iş günü\n- **5 - 15 Yıl Kıdem:** 20 iş günü\n- **15 Yıl ve Üzeri:** 26 iş günü\n\n*Not: Yıllık izin talepleri en az 3 iş günü öncesinden İK portalı üzerinden onaya gönderilmelidir.*`,
-      sources: [{ title: 'Yıllık ve Mazeret İzinleri Yönetmeliği', policy_code: 'HR-003', data_mode: 'DEMO', is_synthetic: true }]
+      sources: [
+        {
+          source_id: 'HR-003',
+          provider: 'HR_POLICY',
+          message_id: 'HR-003',
+          thread_id: null,
+          title: 'Yıllık ve Mazeret İzinleri Yönetmeliği',
+          sender: 'İnsan Kaynakları',
+          received_at: null,
+          project_code: null,
+          data_mode: 'DEMO',
+          is_synthetic: true
+        }
+      ]
     };
   }
 
   if (q.includes('kiyafet') || q.includes('dress code')) {
     return {
       answer: `### Kıyafet Yönetmeliği (HR-012)\n\n- **Pazartesi – Perşembe:** Smart Casual (İş ortamına uygun rahat-şık giyim).\n- **Cuma:** Casual Day (Serbest giyim).\n- **Üretim / Fabrika:** İSG standartlarına uygun koruyucu kıyafet ve çelik burunlu ayakkabı giyilmesi zorunludur.`,
-      sources: [{ title: 'Şirket İçi Davranış ve Giyim Kuralları', policy_code: 'HR-012', data_mode: 'DEMO', is_synthetic: true }]
+      sources: [
+        {
+          source_id: 'HR-012',
+          provider: 'HR_POLICY',
+          message_id: 'HR-012',
+          thread_id: null,
+          title: 'Şirket İçi Davranış ve Giyim Kuralları',
+          sender: 'İnsan Kaynakları',
+          received_at: null,
+          project_code: null,
+          data_mode: 'DEMO',
+          is_synthetic: true
+        }
+      ]
     };
   }
 
   try {
-    // Dynamic PGVector search for other HR questions
     const embData = await new Promise((resolve, reject) => {
       const data = JSON.stringify({ model: 'qwen3-embedding:0.6b', prompt: question });
       const req = http.request({
@@ -162,7 +228,7 @@ async function queryHrPolicyRag(question) {
     if (embData && embData.embedding) {
       const vecStr = '[' + embData.embedding.join(',') + ']';
       const rows = runAdminPsqlJson(`
-        SELECT c.content, d.title, d.external_id AS policy_code,
+        SELECT c.content, d.id as doc_id, d.title, d.external_id AS policy_code,
                ROUND((1 - (c.embedding <=> '${vecStr}'::vector))::numeric, 4) AS similarity
         FROM rag.chunk c
         JOIN rag.document d ON c.document_id = d.id
@@ -173,7 +239,18 @@ async function queryHrPolicyRag(question) {
       if (rows.length > 0) {
         return {
           answer: `### İK Politikası Bilgisi\n\n${rows[0].content}\n\n*Not: Bilgi resmi İK dokümanlarından getirilmiştir.*`,
-          sources: rows.map(r => ({ title: r.title, policy_code: r.policy_code, data_mode: 'DEMO', is_synthetic: true }))
+          sources: rows.map(r => ({
+            source_id: r.doc_id || r.policy_code,
+            provider: 'HR_POLICY',
+            message_id: r.policy_code,
+            thread_id: null,
+            title: r.title,
+            sender: 'İnsan Kaynakları',
+            received_at: null,
+            project_code: null,
+            data_mode: 'DEMO',
+            is_synthetic: true
+          }))
         };
       }
     }
@@ -181,12 +258,25 @@ async function queryHrPolicyRag(question) {
 
   return {
     answer: '### Çalışma Saatleri Politikası (HR-001)\n\nMerkez ofis ve Ar-Ge birimleri standart mesai saatleri hafta içi **09:00 - 18:00** arasındadır (Öğle molası 12:30 - 13:30).',
-    sources: [{ title: 'Çalışma Saatleri ve Fazla Mesai Politikası', policy_code: 'HR-001', data_mode: 'DEMO', is_synthetic: true }]
+    sources: [
+      {
+        source_id: 'HR-001',
+        provider: 'HR_POLICY',
+        message_id: 'HR-001',
+        thread_id: null,
+        title: 'Çalışma Saatleri ve Fazla Mesai Politikası',
+        sender: 'İnsan Kaynakları',
+        received_at: null,
+        project_code: null,
+        data_mode: 'DEMO',
+        is_synthetic: true
+      }
+    ]
   };
 }
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', `http://localhost:${PORT}`);
+  res.setHeader('Access-Control-Allow-Origin', `*`);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -220,33 +310,38 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // API Feedback Endpoint
+  // API Endpoints
   if (req.method === 'POST' && req.url === '/api/feedback') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', chunk => body += chunk);
     req.on('end', () => {
       try {
-        const { request_id, feedback } = JSON.parse(body || '{}');
-        if (request_id && feedback) {
-          runAdminPsql(`UPDATE audit.chat_request SET user_feedback = '${feedback.replace(/'/g, "''")}' WHERE request_id = '${request_id}';`);
-        }
+        const payload = JSON.parse(body || '{}');
+        const reqId = payload.request_id || 'unknown';
+        const feedbackVal = payload.feedback || 'neutral';
+        const auditSql = `
+          UPDATE audit.chat_request 
+          SET feedback_rating = '${feedbackVal.replace(/'/g, "''")}', 
+              feedback_received_at = now()
+          WHERE request_id = '${reqId.replace(/'/g, "''")}';
+        `;
+        runAdminPsql(auditSql);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'SUCCESS' }));
-      } catch (err) {
+        res.end(JSON.stringify({ status: 'OK', request_id: reqId, feedback: feedbackVal }));
+      } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ERROR' }));
+        res.end(JSON.stringify({ status: 'ERROR', message: e.message }));
       }
     });
     return;
   }
 
-  // API Chat Endpoint
   if (req.method === 'POST' && req.url === '/api/chat') {
+    const t0 = Date.now();
+    const requestId = crypto.randomUUID();
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', chunk => body += chunk);
     req.on('end', async () => {
-      const t0 = Date.now();
-      const requestId = crypto.randomUUID();
       try {
         const payload = JSON.parse(body || '{}');
         const userMessage = (payload.message || '').trim();
@@ -258,7 +353,7 @@ const server = http.createServer(async (req, res) => {
             request_id: requestId,
             session_id: sessionId,
             workflow_name: 'Chat_UI',
-            error: { message: 'rate_limit exceeded (max 10 requests per minute)' }
+            error: { message: 'rate_limit exceeded (max 15 requests per minute)' }
           });
           res.writeHead(429, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({
@@ -267,6 +362,7 @@ const server = http.createServer(async (req, res) => {
             intent: 'RATE_LIMIT',
             title: 'Sistem Uyarısı',
             answer: errRes.user_message,
+            sources: [],
             audit_id: errRes.audit_id
           }));
           return;
@@ -280,7 +376,8 @@ const server = http.createServer(async (req, res) => {
             status: 'ERROR',
             intent: 'INVALID_INPUT',
             title: 'Girdi Uyarısı',
-            answer: 'İstek güvenli kullanım sınırını aştı (maksimum 4.000 karakter). Lütfen sorunuzu daraltarak yeniden deneyin.'
+            answer: 'İstek güvenli kullanım sınırını aştı (maksimum 4.000 karakter). Lütfen sorunuzu daraltarak yeniden deneyin.',
+            sources: []
           }));
           return;
         }
@@ -296,7 +393,7 @@ const server = http.createServer(async (req, res) => {
               intent: guardRes.intent,
               title: guardRes.title,
               answer: guardRes.answer,
-              sources: [],
+              sources: guardRes.sources || [],
               route_used: guardRes.route_used,
               retrieval_used: false
             };
@@ -308,12 +405,31 @@ const server = http.createServer(async (req, res) => {
               title: 'Devam Bilgisi',
               answer: sqlRes.answer,
               sql: sqlRes.sql,
-              sources: [],
+              sources: [
+                {
+                  source_id: 'attendance.daily_summary',
+                  provider: 'POSTGRESQL',
+                  message_id: 'attendance_daily_summary',
+                  thread_id: null,
+                  title: 'Puantaj ve Turnike Günlük Özeti',
+                  sender: 'Puantaj Veritabanı',
+                  received_at: null,
+                  project_code: null,
+                  data_mode: 'LIVE_TEST',
+                  is_synthetic: false
+                }
+              ],
               retrieval_used: false,
               is_synthetic: false
             };
           } else if (guardRes.intent === 'PROJECT_MAIL') {
-            const mailRes = await answerProjectMailQuery({ question: userMessage, session_id: sessionId });
+            const mailRes = await answerProjectMailQuery({
+              question: userMessage,
+              session_id: sessionId,
+              query_mode: guardRes.entities?.query_mode,
+              project_code: guardRes.entities?.project_code,
+              sender: guardRes.entities?.sender
+            });
             finalResult = {
               status: mailRes.status,
               intent: 'PROJECT_MAIL',
@@ -321,6 +437,8 @@ const server = http.createServer(async (req, res) => {
               answer: mailRes.answer,
               sources: mailRes.sources || [],
               is_synthetic: mailRes.is_synthetic,
+              data_mode: mailRes.data_mode,
+              synthetic_notice: mailRes.synthetic_notice,
               retrieval_used: true
             };
           } else if (guardRes.intent === 'HYBRID') {
@@ -338,8 +456,8 @@ const server = http.createServer(async (req, res) => {
               status: 'SUCCESS',
               intent: 'COMPANY_KNOWLEDGE',
               title: 'Şirket Bilgisi',
-              answer: '### NISO & Eldor Şirket Bilgisi\n\n- **Faaliyet Alanları:** Otomotiv elektroniği, elektrikli araç batarya yönetim sistemleri (BMS), motor kontrol üniteleri (ECU), otonom robotik (UGV) ve endüstriyel yapay zekâ çözümleri.\n- **Fabrika & Lokasyon:** Ana üretim ve Ar-Ge merkezi ESBAŞ (Ege Serbest Bölgesi) / İzmir lokasyonundadır.\n- **Önemli Projeler:** TEMSA Elektrikli Otobüs, Vortex Otonom Sürüş Motoru, Eldor On-Board Charger (OBC) ve NISO Akıllı Fabrika İzleme Sistemleri.',
-              sources: [{ title: 'Şirket Tanıtım Dokümanı', policy_code: 'NISO-CORP', data_mode: 'LIVE', is_synthetic: false }],
+              answer: guardRes.answer,
+              sources: guardRes.sources || [],
               retrieval_used: false
             };
           } else if (guardRes.intent === 'HR_POLICY') {
@@ -359,16 +477,62 @@ const server = http.createServer(async (req, res) => {
           const llmIntent = await queryLlmIntent(userMessage);
           if (llmIntent.confidence >= 0.75 && llmIntent.intent === 'ATTENDANCE_SQL') {
             const sqlRes = await executeSecureTextToSql(userMessage, sessionId);
-            finalResult = { status: sqlRes.status, intent: 'ATTENDANCE_SQL', title: 'Devam Bilgisi', answer: sqlRes.answer, sql: sqlRes.sql, sources: [], retrieval_used: false };
+            finalResult = {
+              status: sqlRes.status,
+              intent: 'ATTENDANCE_SQL',
+              title: 'Devam Bilgisi',
+              answer: sqlRes.answer,
+              sql: sqlRes.sql,
+              sources: [
+                {
+                  source_id: 'attendance.daily_summary',
+                  provider: 'POSTGRESQL',
+                  message_id: 'attendance_daily_summary',
+                  thread_id: null,
+                  title: 'Puantaj ve Turnike Günlük Özeti',
+                  sender: 'Puantaj Veritabanı',
+                  received_at: null,
+                  project_code: null,
+                  data_mode: 'LIVE_TEST',
+                  is_synthetic: false
+                }
+              ],
+              retrieval_used: false
+            };
           } else if (llmIntent.confidence >= 0.75 && llmIntent.intent === 'PROJECT_MAIL') {
             const mailRes = await answerProjectMailQuery({ question: userMessage, session_id: sessionId });
-            finalResult = { status: mailRes.status, intent: 'PROJECT_MAIL', title: 'Proje E-postası (RAG)', answer: mailRes.answer, sources: mailRes.sources || [], is_synthetic: mailRes.is_synthetic, retrieval_used: true };
+            finalResult = {
+              status: mailRes.status,
+              intent: 'PROJECT_MAIL',
+              title: 'Proje E-postası (RAG)',
+              answer: mailRes.answer,
+              sources: mailRes.sources || [],
+              is_synthetic: mailRes.is_synthetic,
+              data_mode: mailRes.data_mode,
+              synthetic_notice: mailRes.synthetic_notice,
+              retrieval_used: true
+            };
           } else if (llmIntent.confidence >= 0.75 && llmIntent.intent === 'HYBRID') {
             const hybRes = await processHybridQuery({ question: userMessage, session_id: sessionId });
-            finalResult = { status: hybRes.status, intent: 'HYBRID', title: 'Hibrit Analiz', answer: hybRes.answer, sources: hybRes.sources || [], retrieval_used: true };
+            finalResult = {
+              status: hybRes.status,
+              intent: 'HYBRID',
+              title: 'Hibrit Analiz',
+              answer: hybRes.answer,
+              sources: hybRes.sources || [],
+              retrieval_used: true
+            };
           } else if (llmIntent.confidence >= 0.75 && llmIntent.intent === 'HR_POLICY') {
             const hrRes = await queryHrPolicyRag(userMessage);
-            finalResult = { status: 'SUCCESS', intent: 'HR_POLICY', title: 'İK Bilgisi', answer: hrRes.answer, sources: hrRes.sources, retrieval_used: true, is_synthetic: true };
+            finalResult = {
+              status: 'SUCCESS',
+              intent: 'HR_POLICY',
+              title: 'İK Bilgisi',
+              answer: hrRes.answer,
+              sources: hrRes.sources,
+              retrieval_used: true,
+              is_synthetic: true
+            };
           } else {
             // Default is UNKNOWN (NEVER HR_POLICY)
             finalResult = {
@@ -402,8 +566,28 @@ const server = http.createServer(async (req, res) => {
           runAdminPsql(auditSql);
         } catch (e) {}
 
-        const hasSynthetic = finalResult.is_synthetic || (finalResult.sources || []).some(s => s.is_synthetic || s.data_mode === 'DEMO');
-        const syntheticNotice = hasSynthetic ? 'Bu cevap sentetik demo verileri içermektedir.' : null;
+        const normalizedSources = (finalResult.sources || []).map(s => ({
+          source_id: s.source_id || s.message_id || s.policy_code || null,
+          provider: s.provider || 'SYSTEM',
+          message_id: s.message_id || s.source_id || null,
+          thread_id: s.thread_id || null,
+          title: s.title || s.subject || 'Başlıksız Kaynak',
+          sender: s.sender || null,
+          received_at: s.received_at || null,
+          project_code: s.project_code || null,
+          data_mode: s.data_mode || (s.is_synthetic ? 'DEMO' : 'LIVE_TEST'),
+          is_synthetic: s.is_synthetic === true || s.data_mode === 'DEMO'
+        }));
+
+        const isAnyDemo = normalizedSources.some(s => s.data_mode === 'DEMO' || s.is_synthetic === true);
+        const hasLiveTest = normalizedSources.some(s => s.data_mode === 'LIVE_TEST');
+
+        let computedNotice = null;
+        if (isAnyDemo) {
+          computedNotice = 'Bu cevap sentetik demo verileri içermektedir.';
+        } else if (hasLiveTest) {
+          computedNotice = 'Bu cevap canlı test verilerine dayanmaktadır.';
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({
@@ -413,10 +597,11 @@ const server = http.createServer(async (req, res) => {
           intent: finalResult.intent,
           title: finalResult.title,
           answer: finalResult.answer,
-          sources: finalResult.sources || [],
+          sources: normalizedSources,
           retrieval_used: finalResult.retrieval_used || false,
-          is_synthetic: hasSynthetic,
-          synthetic_notice: syntheticNotice,
+          is_synthetic: isAnyDemo,
+          data_mode: isAnyDemo ? 'DEMO' : (hasLiveTest ? 'LIVE_TEST' : 'LIVE'),
+          synthetic_notice: computedNotice,
           latency_ms: latencyMs
         }));
 
@@ -433,6 +618,7 @@ const server = http.createServer(async (req, res) => {
           intent: 'SYSTEM_ERROR',
           title: 'Sistem Hatası',
           answer: errRes.user_message,
+          sources: [],
           audit_id: errRes.audit_id
         }));
       }
