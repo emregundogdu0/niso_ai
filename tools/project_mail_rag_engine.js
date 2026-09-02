@@ -118,6 +118,9 @@ async function answerLatestMailDirect(params) {
   const projectCode = params.project_code || null;
   const sender = params.sender || null;
   const lang = params.response_language || 'tr';
+  const mailCount = Math.min(20, Math.max(1, Number(params.mail_count) || 1));
+  const dateScope = params.date_scope || null;
+  const queryMode = params.query_mode || 'LATEST_MAIL';
 
   let whereClauses = [
     `d.source_type = 'EMAIL'`,
@@ -133,6 +136,12 @@ async function answerLatestMailDirect(params) {
   }
   if (sender) {
     whereClauses.push(`d.sender_address ILIKE '%${sender.replace(/'/g, "''")}%'`);
+  }
+  const archiveWhereClauses = [...whereClauses];
+  if (dateScope === 'YESTERDAY') {
+    whereClauses.push(`(d.received_at AT TIME ZONE 'Europe/Istanbul')::date = ((CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date - 1)`);
+  } else if (dateScope === 'TODAY') {
+    whereClauses.push(`(d.received_at AT TIME ZONE 'Europe/Istanbul')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date`);
   }
 
   const selectDocSql = `
@@ -154,12 +163,23 @@ async function answerLatestMailDirect(params) {
      AND m.provider = d.source_provider
     WHERE ${whereClauses.join(' AND ')}
     ORDER BY d.received_at DESC
-    LIMIT 1;
+    LIMIT ${mailCount};
   `;
 
   const docRows = runAdminPsqlJson(selectDocSql);
   if (docRows.length === 0) {
-    let notFoundMsg = 'Sistemde kayıtlı onaylanmış bir iş e-postası bulunamadı.';
+    const archiveCountRows = runAdminPsqlJson(`
+      SELECT COUNT(*)::int AS count
+      FROM rag.document d
+      JOIN mail.ingestion_event m
+        ON m.provider_message_id = d.external_id
+       AND m.provider = d.source_provider
+      WHERE ${archiveWhereClauses.join(' AND ')};
+    `);
+    const archiveCount = archiveCountRows[0]?.count || 0;
+    let notFoundMsg = dateScope === 'TODAY'
+      ? `Bugün gelen onaylanmış bir iş e-postası bulunamadı. Daha önce indekslenen ${archiveCount} e-posta kalıcı arşivde saklanmaya devam ediyor.`
+      : (dateScope === 'YESTERDAY' ? `Dün gelen onaylanmış bir iş e-postası bulunamadı. Daha önce indekslenen ${archiveCount} e-posta kalıcı arşivde saklanmaya devam ediyor.` : 'Sistemde kayıtlı onaylanmış bir iş e-postası bulunamadı.');
     if (lang === 'en') notFoundMsg = 'No verified business email was found in the system.';
     if (lang === 'it') notFoundMsg = 'Nessuna email aziendale verificata trovata nel sistema.';
 
@@ -174,71 +194,64 @@ async function answerLatestMailDirect(params) {
     };
   }
 
-  const doc = docRows[0];
-
-  // Fetch all chunks for full content
-  const chunksSql = `
-    SELECT chunk_index, content
-    FROM rag.chunk
-    WHERE document_id = '${doc.id}'
-    ORDER BY chunk_index ASC;
-  `;
-  const chunks = runAdminPsqlJson(chunksSql);
-  const fullContent = chunks.map(c => c.content).join('\n\n');
-
   // Format received date
   const localeMap = { tr: 'tr-TR', en: 'en-US', it: 'it-IT' };
-  const dateStr = doc.received_at 
-    ? new Date(doc.received_at).toLocaleDateString(localeMap[lang] || 'tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-    : 'N/A';
+  const mailEntries = docRows.map((doc, index) => {
+    const chunksSql = `
+      SELECT chunk_index, content
+      FROM rag.chunk
+      WHERE document_id = '${doc.id}'
+      ORDER BY chunk_index ASC;
+    `;
+    const chunks = runAdminPsqlJson(chunksSql);
+    const fullContent = chunks.map(c => c.content).join('\n\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\\+\s*$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    const dateStr = doc.received_at
+      ? new Date(doc.received_at).toLocaleDateString(localeMap[lang] || 'tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'N/A';
+    const isSynthetic = doc.is_synthetic === true || doc.data_mode === 'DEMO';
+    const source = {
+      source_id: doc.id,
+      provider: doc.provider,
+      message_id: doc.message_id,
+      thread_id: doc.thread_id || null,
+      title: doc.title || (lang === 'en' ? 'Untitled Email' : (lang === 'it' ? 'Email Senza Titolo' : 'Başlıksız E-posta')),
+      sender: doc.sender || null,
+      received_at: doc.received_at || null,
+      project_code: doc.project_code || null,
+      data_mode: doc.data_mode || (isSynthetic ? 'DEMO' : 'LIVE_TEST'),
+      is_synthetic: isSynthetic
+    };
+    return { doc, index, fullContent, dateStr, isSynthetic, source };
+  });
 
-  // Build Structured Response according to language
   let responseMarkdown = '';
-  if (lang === 'en') {
-    responseMarkdown += `### Latest Email Summary\n\n`;
-    responseMarkdown += `- **Subject:** ${doc.title || 'Untitled'}\n`;
-    responseMarkdown += `- **Sender:** \`${doc.sender || 'Unknown'}\`\n`;
-    responseMarkdown += `- **Received Date:** ${dateStr}\n`;
-    responseMarkdown += `- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n`;
-    responseMarkdown += `#### Email Content and Status\n`;
-    responseMarkdown += `${fullContent.trim()}\n`;
-  } else if (lang === 'it') {
-    responseMarkdown += `### Riepilogo dell'Ultima Email\n\n`;
-    responseMarkdown += `- **Oggetto:** ${doc.title || 'Senza titolo'}\n`;
-    responseMarkdown += `- **Mittente:** \`${doc.sender || 'Sconosciuto'}\`\n`;
-    responseMarkdown += `- **Data di Ricezione:** ${dateStr}\n`;
-    responseMarkdown += `- **Progetto:** ${doc.project_name || doc.project_code || 'Progetto Generale'}\n\n`;
-    responseMarkdown += `#### Contenuto e Stato dell'Email\n`;
-    responseMarkdown += `${fullContent.trim()}\n`;
-  } else {
-    responseMarkdown += `### Son Gelen E-Posta Özeti\n\n`;
-    responseMarkdown += `- **Konu:** ${doc.title || 'Başlıksız'}\n`;
-    responseMarkdown += `- **Gönderen:** \`${doc.sender || 'Bilinmiyor'}\`\n`;
-    responseMarkdown += `- **Alınma Tarihi:** ${dateStr}\n`;
-    responseMarkdown += `- **Proje:** ${doc.project_name || doc.project_code || 'Genel Proje Bilgisi'}\n\n`;
-    responseMarkdown += `#### E-Posta İçeriği ve Durum\n`;
-    responseMarkdown += `${fullContent.trim()}\n`;
+  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : (dateScope === 'YESTERDAY' ? "Yesterday's" : 'Latest Email Summaries')} (${mailEntries.length})\n\n`;
+  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti')} (${mailEntries.length})\n\n`;
+  else responseMarkdown += `### ${queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri')} (${mailEntries.length})\n\n`;
+
+  for (const entry of mailEntries) {
+    const { doc, index, fullContent, dateStr } = entry;
+    if (lang === 'en') {
+      responseMarkdown += `#### ${index + 1}. ${doc.title || 'Untitled'}\n- **Sender:** \`${doc.sender || 'Unknown'}\`\n- **Received:** ${dateStr}\n- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n${fullContent}\n\n`;
+    } else if (lang === 'it') {
+      responseMarkdown += `#### ${index + 1}. ${doc.title || 'Senza titolo'}\n- **Mittente:** \`${doc.sender || 'Sconosciuto'}\`\n- **Ricevuta:** ${dateStr}\n- **Progetto:** ${doc.project_name || doc.project_code || 'Progetto Generale'}\n\n${fullContent}\n\n`;
+    } else {
+      responseMarkdown += `#### ${index + 1}. ${doc.title || 'Başlıksız'}\n- **Gönderen:** \`${doc.sender || 'Bilinmiyor'}\`\n- **Alınma Tarihi:** ${dateStr}\n- **Proje:** ${doc.project_name || doc.project_code || 'Genel Proje Bilgisi'}\n\n${fullContent}\n\n`;
+    }
   }
 
-  const isSynthetic = doc.is_synthetic === true || doc.data_mode === 'DEMO';
-
-  const unifiedSource = {
-    source_id: doc.id,
-    provider: doc.provider,
-    message_id: doc.message_id,
-    thread_id: doc.thread_id || null,
-    title: doc.title || (lang === 'en' ? 'Untitled Email' : (lang === 'it' ? 'Email Senza Titolo' : 'Başlıksız E-posta')),
-    sender: doc.sender || null,
-    received_at: doc.received_at || null,
-    project_code: doc.project_code || null,
-    data_mode: doc.data_mode || (isSynthetic ? 'DEMO' : 'LIVE_TEST'),
-    is_synthetic: isSynthetic
-  };
+  const sources = mailEntries.map(entry => entry.source);
+  const isSynthetic = mailEntries.some(entry => entry.isSynthetic);
+  const hasLiveTest = sources.some(source => source.data_mode === 'LIVE_TEST');
 
   let notice = null;
   if (isSynthetic) {
     notice = lang === 'en' ? 'This response contains synthetic demo data.' : (lang === 'it' ? 'Questa risposta contiene dati demo sintetici.' : 'Bu cevap sentetik demo verileri içermektedir.');
-  } else if (unifiedSource.data_mode === 'LIVE_TEST') {
+  } else if (hasLiveTest) {
     notice = lang === 'en' ? 'This response is based on live test data.' : (lang === 'it' ? 'Questa risposta si basa su dati di test dal vivo.' : 'Bu cevap canlı test verilerine dayanmaktadır.');
   }
 
@@ -246,13 +259,13 @@ async function answerLatestMailDirect(params) {
     request_id: requestId,
     session_id: sessionId,
     answer: responseMarkdown.trim(),
-    project_code: doc.project_code,
-    project_name: doc.project_name,
+    project_code: projectCode || mailEntries[0].doc.project_code,
+    project_name: mailEntries[0].doc.project_name,
     status: 'SUCCESS',
-    sources: [unifiedSource],
-    source_count: 1,
+    sources,
+    source_count: sources.length,
     is_synthetic: isSynthetic,
-    data_mode: unifiedSource.data_mode,
+    data_mode: isSynthetic ? 'DEMO' : (hasLiveTest ? 'LIVE_TEST' : 'LIVE'),
     synthetic_notice: notice,
     latency_ms: Date.now() - startTime
   };
@@ -297,12 +310,15 @@ async function answerProjectMailQuery(params) {
   const projectCode = projectInfo.code;
   const projectName = projectInfo.name;
 
-  if (queryMode === 'LATEST_MAIL' || queryMode === 'MAIL_BY_SENDER') {
+  if (queryMode === 'LATEST_MAIL' || queryMode === 'MAIL_BY_SENDER' || queryMode === 'MAIL_ARCHIVE') {
     return answerLatestMailDirect({
       request_id: requestId,
       session_id: sessionId,
       project_code: projectCode,
       sender: params.sender,
+      mail_count: params.mail_count,
+      date_scope: params.date_scope,
+      query_mode: queryMode,
       response_language: lang
     });
   }
