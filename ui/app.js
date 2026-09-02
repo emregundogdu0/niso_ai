@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Helper: Markdown Parser & HTML Sanitizer
   // =========================================================================
   function escapeHtml(str) {
-    if (!str) return '';
+    if (str === null || str === undefined) return '';
     return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -214,21 +214,53 @@ document.addEventListener('DOMContentLoaded', () => {
       const auditId = data.audit_id || data.request_id || ('req_' + Date.now().toString(36));
       const isSmallOrHelp = ['SMALL_TALK', 'HELP', 'UNKNOWN', 'SECURITY_REJECTED'].includes(data.intent);
 
-      const syntheticNoticeHtml = data.is_synthetic 
-        ? '<div class="synthetic-banner">⚠️ <em>Bu cevap sentetik demo verileri içermektedir.</em></div>' 
-        : '';
+      // Synthetic / Live Test Notice
+      let noticeHtml = '';
+      if (data.synthetic_notice) {
+        noticeHtml = `<div class="synthetic-banner">⚠️ <em>${escapeHtml(data.synthetic_notice)}</em></div>`;
+      } else if (data.is_synthetic) {
+        noticeHtml = `<div class="synthetic-banner">⚠️ <em>Bu cevap sentetik demo verileri içermektedir.</em></div>`;
+      }
 
-      // Sources HTML
+      // Unified Sources Card Rendering
       let sourcesHtml = '';
-      if (data.sources && data.sources.length > 0) {
-        sourcesHtml = '<div style="margin-top:10px;font-size:12px;color:var(--muted);"><strong>Kaynaklar:</strong> ' + 
-          data.sources.map(s => `<code>${s.policy_code || s.code || s.title}</code>`).join(', ') + '</div>';
+      if (Array.isArray(data.sources) && data.sources.length > 0 && !isSmallOrHelp) {
+        const validSources = data.sources.filter(s => s && typeof s === 'object');
+        if (validSources.length > 0) {
+          sourcesHtml = `
+            <div class="sources-card">
+              <div class="sources-title">Doğrulanmış Kaynaklar (${validSources.length})</div>
+              <div class="sources-items">
+                ${validSources.map(s => {
+                  const mode = (s.data_mode || (s.is_synthetic ? 'DEMO' : 'LIVE_TEST')).toUpperCase();
+                  const badgeClass = mode === 'LIVE' ? 'badge-live' : (mode === 'LIVE_TEST' ? 'badge-live-test' : 'badge-demo');
+                  const badgeText = mode === 'LIVE' ? 'Canlı Kaynak' : (mode === 'LIVE_TEST' ? 'Canlı Test' : 'Sentetik Demo');
+                  const title = escapeHtml(s.title || s.subject || 'Başlıksız kaynak');
+                  const ref = s.source_id || s.message_id || s.policy_code || '';
+                  const metaParts = [];
+                  if (s.sender) metaParts.push(s.sender);
+                  if (s.received_at) metaParts.push(new Date(s.received_at).toLocaleDateString('tr-TR'));
+                  const metaStr = metaParts.length > 0 ? `(${escapeHtml(metaParts.join(' • '))})` : '';
+
+                  return `
+                    <div class="source-row">
+                      <span class="source-badge ${badgeClass}">[${badgeText}]</span>
+                      <strong class="source-name">${title}</strong>
+                      ${ref ? `<code class="source-code">${escapeHtml(String(ref).substring(0, 18))}</code>` : ''}
+                      ${metaStr ? `<span class="source-meta">${metaStr}</span>` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
       }
 
       row.innerHTML = `
         <div class="msg-bubble">
           <span class="route-badge ${routeClass}">${routeLabel}</span>
-          <div class="msg-content">${contentHtml}${syntheticNoticeHtml}${sourcesHtml}</div>
+          <div class="msg-content">${contentHtml}${noticeHtml}${sourcesHtml}</div>
           <div class="msg-actions">
             ${!isSmallOrHelp ? `<span>Ref: <code>${auditId.substring(0, 8)}</code></span>` : '<span></span>'}
             <button class="action-btn copy-btn" title="Yanıtı Kopyala" aria-label="Yanıtı Kopyala">
