@@ -105,7 +105,7 @@ function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
   }
 
   // 4. Relative terms: Today / Bugün / Oggi
-  if (qNorm.includes('bugun') || qNorm.includes('today') || qNorm.includes('oggi')) {
+  if (qNorm.includes('bugun') || qNorm.includes('bu gun') || qNorm.includes('today') || qNorm.includes('oggi')) {
     const iso = formatDateIso(today);
     dateFrom = iso;
     dateTo = iso;

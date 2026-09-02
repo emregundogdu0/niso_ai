@@ -296,7 +296,8 @@ const server = http.createServer(async (req, res) => {
 
   // Static File Serving
   if (req.method === 'GET') {
-    let filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
+    const requestPath = new URL(req.url, 'http://localhost').pathname;
+    let filePath = path.join(__dirname, requestPath === '/' ? 'index.html' : requestPath);
     if (!fs.existsSync(filePath)) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('404 Not Found');
@@ -313,7 +314,10 @@ const server = http.createServer(async (req, res) => {
       '.jpeg': 'image/jpeg',
       '.ico': 'image/x-icon'
     };
-    res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
+    res.writeHead(200, {
+      'Content-Type': mimeTypes[ext] || 'text/plain',
+      'Cache-Control': 'no-store'
+    });
     fs.createReadStream(filePath).pipe(res);
     return;
   }
@@ -456,6 +460,8 @@ const server = http.createServer(async (req, res) => {
               query_mode: guardRes.entities?.query_mode,
               project_code: guardRes.entities?.project_code,
               sender: guardRes.entities?.sender,
+              mail_count: guardRes.entities?.mail_count,
+              date_scope: guardRes.entities?.date_scope,
               response_language: activeLang
             });
             finalResult = {

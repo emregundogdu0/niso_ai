@@ -1,6 +1,6 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
-const { parseMultilingualDateRange } = require('./date_normalizer');
+const { parseMultilingualDateRange, normalizeText } = require('./date_normalizer');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const LLM_MODEL = 'qwen3.5:9b';
@@ -53,7 +53,7 @@ function normalizeDateAndEntities(question, lang = 'tr') {
 
 // Fast Deterministic Pattern Matcher for High-Performance Text-to-SQL (< 5ms)
 function resolveFastDeterministicSql(question, dateContext) {
-  const q = question.toLowerCase();
+  const q = normalizeText(question);
   const dateClause = dateContext.sqlClause || `day = '2026-09-02'`;
 
   // 1. Most late employees
@@ -69,6 +69,7 @@ function resolveFastDeterministicSql(question, dateContext) {
   // 3. Late arrivals today / on date (TR, EN, IT)
   if (
     q.includes('gec kaldi') || q.includes('geciken') || q.includes('gec kalan') ||
+    q.includes('gec geldi') || q.includes('gec gelen') || q.includes('kimler gec geldi') ||
     q.includes('arrived late') || q.includes('is late') || q.includes('who is late') || q.includes('who arrived late') ||
     q.includes('in ritardo') || q.includes('arrivato in ritardo') || q.includes('chi e in ritardo') || q.includes('chi e arrivato in ritardo')
   ) {

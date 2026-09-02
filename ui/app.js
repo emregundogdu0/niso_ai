@@ -33,10 +33,8 @@ document.addEventListener('DOMContentLoaded', () => {
         step_1: 'Soru analiz ediliyor ve sınıflandırılıyor...',
         step_2: 'Veritabanı ve dokümanlar taranıyor...',
         step_3: 'Yanıt güvenli şekilde sentezleniyor...',
-        copy: '📋 Kopyala',
-        copied: '✅ Kopyalandı',
-        helpful: '👍 Yararlı',
-        not_helpful: '👎 Yararlı Değil',
+        copy: 'Kopyala',
+        copied: 'Kopyalandı',
         sources_title: 'Doğrulanmış Kaynaklar',
         badge_demo: 'Sentetik Demo',
         badge_live_test: 'Canlı Test',
@@ -91,10 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
         step_1: 'Analyzing and classifying query...',
         step_2: 'Scanning database and documents...',
         step_3: 'Synthesizing secure response...',
-        copy: '📋 Copy',
-        copied: '✅ Copied',
-        helpful: '👍 Helpful',
-        not_helpful: '👎 Not Helpful',
+        copy: 'Copy',
+        copied: 'Copied',
         sources_title: 'Verified Sources',
         badge_demo: 'Synthetic Demo',
         badge_live_test: 'Live Test',
@@ -149,10 +145,8 @@ document.addEventListener('DOMContentLoaded', () => {
         step_1: 'Analisi e classificazione della richiesta...',
         step_2: 'Scansione del database e dei documenti...',
         step_3: 'Sintesi sicura della risposta...',
-        copy: '📋 Copia',
-        copied: '✅ Copiato',
-        helpful: '👍 Utile',
-        not_helpful: '👎 Non Utile',
+        copy: 'Copia',
+        copied: 'Copiato',
         sources_title: 'Fonti Verificate',
         badge_demo: 'Demo Sintetica',
         badge_live_test: 'Test dal Vivo',
@@ -585,13 +579,8 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="msg-actions">
             ${!isSmallOrHelp ? `<span>Ref: <code>${auditId.substring(0, 8)}</code></span>` : '<span></span>'}
             <button class="action-btn copy-btn" title="${I18n.t('copy')}" aria-label="${I18n.t('copy')}">
-              ${I18n.t('copy')}
-            </button>
-            <button class="action-btn feedback-btn" data-val="helpful" title="${I18n.t('helpful')}" aria-label="${I18n.t('helpful')}">
-              ${I18n.t('helpful')}
-            </button>
-            <button class="action-btn feedback-btn" data-val="not_helpful" title="${I18n.t('not_helpful')}" aria-label="${I18n.t('not_helpful')}">
-              ${I18n.t('not_helpful')}
+              <span class="copy-icon" aria-hidden="true"></span>
+              <span class="copy-label">${I18n.t('copy')}</span>
             </button>
           </div>
         </div>
@@ -601,26 +590,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const copyBtn = row.querySelector('.copy-btn');
       copyBtn.addEventListener('click', () => {
         navigator.clipboard.writeText(data.answer || data.user_message || '');
-        copyBtn.textContent = I18n.t('copied');
-        setTimeout(() => { copyBtn.textContent = I18n.t('copy'); }, 2000);
-      });
-
-      // Feedback Handlers
-      const feedbackBtns = row.querySelectorAll('.feedback-btn');
-      feedbackBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-          const val = btn.getAttribute('data-val');
-          feedbackBtns.forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          fetch('/api/feedback', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              request_id: data.request_id || auditId,
-              feedback: val
-            })
-          }).catch(() => {});
-        });
+        const copyLabel = copyBtn.querySelector('.copy-label');
+        copyLabel.textContent = I18n.t('copied');
+        setTimeout(() => { copyLabel.textContent = I18n.t('copy'); }, 2000);
       });
 
       DOM.conversationStream.appendChild(row);

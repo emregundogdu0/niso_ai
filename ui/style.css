@@ -1030,6 +1030,35 @@ body {
   transition: var(--transition);
 }
 
+.copy-icon {
+  width: 14px;
+  height: 14px;
+  position: relative;
+  display: inline-block;
+  flex: 0 0 14px;
+}
+
+.copy-icon::before,
+.copy-icon::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  background: #ffffff;
+}
+
+.copy-icon::before {
+  left: 1px;
+  top: 1px;
+}
+
+.copy-icon::after {
+  right: 0;
+  bottom: 0;
+}
+
 .action-btn:hover {
   background: var(--cyan-light);
   color: var(--navy);
@@ -1096,6 +1125,11 @@ body {
    ========================================================================== */
 .stream-loading-bar {
   display: flex;
+  position: absolute;
+  left: 50%;
+  bottom: 112px;
+  transform: translateX(-50%);
+  z-index: 35;
   align-items: center;
   justify-content: center;
   gap: 12px;
@@ -1105,7 +1139,7 @@ body {
   border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
   width: fit-content;
-  margin: 10px auto 20px;
+  margin: 0;
   font-size: 13.5px;
   color: var(--muted);
   animation: pulse 1.5s infinite;
@@ -1316,6 +1350,12 @@ body {
     left: 50%;
     width: calc(100% - 32px);
     bottom: 16px;
+  }
+
+  .stream-loading-bar {
+    bottom: 96px;
+    max-width: calc(100% - 32px);
+    text-align: center;
   }
 
   .top-meta {

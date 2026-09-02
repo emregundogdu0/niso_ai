@@ -261,8 +261,52 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     };
   }
 
-  // 4. Help Detection in TR, EN, IT
-  const helpTr = ['neler yapabilirsin', 'nasil kullanilir', 'bana nasil yardimci olabilirsin', 'yardim'];
+  // 4. Safe deterministic arithmetic for simple two-number operations.
+  const verbalMath = norm.match(/\b(-?\d+(?:[.,]\d+)?)\s+(kere|carpi|bolu|arti|eksi|times|divided by|plus|minus|per|diviso|piu|meno)\s+(-?\d+(?:[.,]\d+)?)\b/);
+  const symbolicMath = raw.match(/(-?\d+(?:[.,]\d+)?)\s*([+\-*/x×÷])\s*(-?\d+(?:[.,]\d+)?)/i);
+  const mathMatch = verbalMath || symbolicMath;
+
+  if (mathMatch) {
+    const left = Number(String(mathMatch[1]).replace(',', '.'));
+    const operator = String(mathMatch[2]).toLowerCase();
+    const right = Number(String(mathMatch[3]).replace(',', '.'));
+    const multiplyOps = ['kere', 'carpi', 'times', 'per', '*', 'x', '×'];
+    const divideOps = ['bolu', 'divided by', 'diviso', '/', '÷'];
+    const addOps = ['arti', 'plus', 'piu', '+'];
+    let result;
+
+    if (multiplyOps.includes(operator)) result = left * right;
+    else if (divideOps.includes(operator)) result = right === 0 ? null : left / right;
+    else if (addOps.includes(operator)) result = left + right;
+    else result = left - right;
+
+    const resultText = result === null
+      ? (lang === 'en' ? 'Division by zero is undefined.' : (lang === 'it' ? 'La divisione per zero non è definita.' : 'Sıfıra bölme işlemi tanımsızdır.'))
+      : (lang === 'en' ? `The result is **${Number(result.toFixed(10))}**.` : (lang === 'it' ? `Il risultato è **${Number(result.toFixed(10))}**.` : `Sonuç **${Number(result.toFixed(10))}** eder.`));
+
+    return {
+      is_deterministic: true,
+      detected_language: lang,
+      language_confidence: langConf,
+      response_language: lang,
+      intent: 'SMALL_TALK',
+      intent_confidence: 1.0,
+      title: lang === 'en' ? 'Assistant' : (lang === 'it' ? 'Assistente' : 'Asistan'),
+      answer: resultText,
+      route_used: 'BASIC_MATH_LOCAL',
+      retrieval_used: false,
+      sources: [],
+      original_question: raw,
+      normalized_question: norm
+    };
+  }
+
+  // 5. Help Detection in TR, EN, IT
+  const helpTr = [
+    'neler yapabilirsin', 'neler yapabiliyorsun', 'sen neler yapabilirsin',
+    'sen neler yapabiliyorsun', 'hangi sorulari sorabilirim', 'ozelliklerin neler',
+    'nasil kullanilir', 'bana nasil yardimci olabilirsin', 'yardim eder misin', 'yardim'
+  ];
   const helpEn = ['what can you do', 'how to use', 'how can you help me', 'help'];
   const helpIt = ['cosa puoi fare', 'come si usa', 'come puoi aiutarmi', 'aiuto'];
 
@@ -289,7 +333,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     };
   }
 
-  // 5. Out-of-domain / Unknown in TR, EN, IT (e.g. cake recipe, joke)
+  // 6. Out-of-domain / Unknown in TR, EN, IT (e.g. cake recipe, joke)
   const unknownPatterns = [
     'kek tarifi', 'yemek tarifi', 'fikra anlat', 'sarki soyle', 'sacma bir sey',
     'cake recipe', 'recipe', 'tell me a joke', 'sing a song', 'random nonsense', 'give me a cake recipe',
@@ -318,7 +362,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     };
   }
 
-  // 6. LATEST_MAIL & Project Mail in TR, EN, IT
+  // 7. LATEST_MAIL & Project Mail in TR, EN, IT
   const latestMailPhrases = [
     // TR
     'son gelen mail', 'en son gelen mail', 'son gelen eposta', 'son eposta', 'son maili ozetle', 'en son e postada ne yaziyor', 'son proje mailini anlat', 'son maili goster',
@@ -330,11 +374,30 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
 
   const hasMailReference = ['mail', 'eposta', 'e posta'].some(p => norm.includes(p));
   const hasLatestCue = ['son ', 'en son', 'sonuncu', 'latest', 'most recent', 'last email', 'ultima'].some(p => norm.includes(p));
+  const hasYesterdayCue = ['dun', 'yesterday', 'ieri'].some(p => norm.includes(p));
+  const hasTodayCue = ['bugun', 'bu gun', 'today', 'oggi'].some(p => norm.includes(p));
+  const hasArchiveCue = [
+    'onceden okunan', 'daha once okunan', 'eski mailler', 'mail arsivi', 'eposta arsivi',
+    'tum mailler', 'tum epostalar', 'previously read', 'email archive', 'old emails',
+    'email gia lette', 'archivio email', 'vecchie email'
+  ].some(p => norm.includes(p));
   const wantsMailContent = ['oku', 'ozet', 'icerik', 'ne yaziyor', 'neyle alakali', 'neden bahsediyor'].some(p => norm.includes(p));
   const hasNamedProject = ['temsa', 'vortex', 'eldor obc', 'obc', 'smart factory'].some(p => norm.includes(p));
   const isLatestMail = latestMailPhrases.some(p => norm.includes(p)) ||
     (hasMailReference && hasLatestCue) ||
     (hasMailReference && wantsMailContent && hasNamedProject);
+  const isDatedMail = hasMailReference && (hasYesterdayCue || hasTodayCue) && wantsMailContent;
+  const isArchiveMail = hasMailReference && hasArchiveCue;
+
+  const numberWords = {
+    bir: 1, iki: 2, uc: 3, dort: 4, bes: 5,
+    alti: 6, yedi: 7, sekiz: 8, dokuz: 9, on: 10
+  };
+  const numericMatch = norm.match(/\b(20|1[0-9]|[1-9])\b/);
+  const wordCount = Object.entries(numberWords).find(([word]) => new RegExp(`\\b${word}\\b`).test(norm));
+  const hasPluralMailReference = ['mailler', 'mailleri', 'epostalar', 'e postalar', 'emails'].some(p => norm.includes(p));
+  const wantsAllArchivedMail = ['tum mailler', 'tum epostalar', 'tum mail arsivi', 'tum eposta arsivi', 'email archive', 'archivio email'].some(p => norm.includes(p));
+  const requestedMailCount = Math.min(20, Math.max(1, numericMatch ? Number(numericMatch[1]) : (wordCount ? wordCount[1] : ((wantsAllArchivedMail || ((hasTodayCue || hasYesterdayCue) && hasPluralMailReference)) ? 20 : (hasPluralMailReference ? 10 : 1)))));
 
   // Extract Project Code if present
   let extractedProjectCode = null;
@@ -343,7 +406,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   else if (norm.includes('eldor obc') || norm.includes('obc')) extractedProjectCode = 'PRJ-ELDOR-OBC';
   else if (norm.includes('smart factory') || norm.includes('fabrika')) extractedProjectCode = 'PRJ-SMART-FACTORY';
 
-  if (isLatestMail) {
+  if (isLatestMail || isDatedMail || isArchiveMail) {
     return {
       is_deterministic: true,
       detected_language: lang,
@@ -353,9 +416,11 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
       intent_confidence: 0.98,
       route_used: 'PROJECT_MAIL',
       entities: {
-        query_mode: 'LATEST_MAIL',
+        query_mode: isArchiveMail ? 'MAIL_ARCHIVE' : 'LATEST_MAIL',
         project_code: extractedProjectCode,
         sender: null,
+        mail_count: requestedMailCount,
+        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : null),
         response_language: lang
       },
       original_question: raw,
@@ -416,7 +481,8 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   // 8. Attendance & SQL in TR, EN, IT
   const attendanceKeywords = [
     // TR
-    'gec kaldi', 'geciken', 'gec kalan', 'mesaide', 'ise geldi', 'zamaninda gelen', 'puantaj',
+    'gec kaldi', 'geciken', 'gec kalan', 'gec geldi', 'gec gelen', 'gec gelenler',
+    'kimler gec geldi', 'mesaide', 'ise geldi', 'zamaninda gelen', 'puantaj',
     // EN
     'arrived late', 'who arrived late', 'who is late', 'was on time', 'who was on time', 'attendance', 'late today',
     // IT
