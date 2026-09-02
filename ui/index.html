@@ -1,101 +1,234 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yönetim Bilgi Asistanı</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NISO Yönetim Asistanı</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="header-left">
-        <div class="brand-badge">NISO & ELDOR AI</div>
-        <div class="title-group">
-          <h1>Yönetim Bilgi Asistanı</h1>
-          <p class="subtitle">İK politikaları, devam verileri ve proje güncellemeleri için şirket içi karar destek asistanı</p>
-        </div>
+  <div class="app">
+    <!-- Component 1: Sidebar (Navigation Rail) -->
+    <aside class="rail" id="sidebarRail" aria-label="Ana Navigasyon">
+      <div class="logo-wrapper">
+        <div class="logo" title="NISO Elektronik & Yapay Zekâ">NISO</div>
       </div>
-      <div class="header-right">
-        <div class="status-pill status-secure">
-          <span class="dot"></span> Yerel ve Güvenli
-        </div>
-        <div class="status-pill status-model">
-          Model: <strong>Qwen3.5-9B</strong>
-        </div>
-        <div class="provider-badges">
-          <span class="provider-badge provider-gmail active" title="Gmail: Aktif (eldornisoai@gmail.com)">Gmail: Aktif</span>
-          <span class="provider-badge provider-outlook passive" title="Outlook: Henüz yapılandırılmadı (Pasif Placeholder)">Outlook: Yapılandırılmadı</span>
-        </div>
+      <nav class="nav">
+        <button class="nav-btn" id="newChatBtn" aria-label="Yeni Sohbet Başlat" title="Yeni Sohbet">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+        <button class="nav-btn" id="historyBtn" aria-label="Sohbet Geçmişi" title="Sohbet Geçmişi">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </button>
+        <button class="nav-btn" id="infoBtn" aria-label="Sistem Bilgisi ve Entegrasyon Durumu" title="Sistem Bilgisi">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </nav>
+      <div class="rail-bottom">
+        <div class="status-indicator-dot" title="Yerel Sunucu Aktif" aria-label="Sunucu Aktif"></div>
       </div>
-    </header>
+    </aside>
 
-    <!-- Main Chat Area -->
-    <main class="chat-main">
-      <div class="chat-messages" id="chatMessages">
-        <!-- Welcome Card -->
-        <div class="welcome-card" id="welcomeCard">
-          <div class="welcome-icon">🏢</div>
-          <h2>Yönetim Bilgi Asistanına Hoş Geldiniz</h2>
-          <p>Şirket içi İK politikaları, çalışan devam/yoklama durumu ve proje e-posta yazışmaları hakkında sorularınızı iletebilirsiniz.</p>
-          <div class="disclaimer-banner">
-            <span class="alert-icon">ℹ️</span>
-            <span>Bu MVP sentetik verilerle çalışır. Yanıtlar karar destek amaçlıdır.</span>
+    <!-- Main View Area -->
+    <main class="main-viewport">
+      <!-- Component 2: UserStatus & Top Bar -->
+      <header class="top-bar">
+        <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Menüyü Aç">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <div class="top-meta">
+          <div class="secure-badge" title="Tüm veriler şirket içi yerel ağda şifrelenir ve izole tutulur">
+            <i class="dot"></i>
+            <span>Güvenli bağlantı</span>
+          </div>
+          <div class="provider-pill" id="providerStatusPill" title="Gmail: Aktif | Outlook: Pasif">
+            <span class="provider-tag gmail-tag">Gmail</span>
+            <span class="provider-tag model-tag">Qwen3.5:9B</span>
+          </div>
+          <div class="avatar" id="userAvatar" title="Oturum Açan Kullanıcı">EG</div>
+        </div>
+      </header>
+
+      <!-- Scrollable Conversation Stream Container -->
+      <section class="chat-viewport" id="chatViewport">
+        <!-- Component 3: ChatWelcome (Centered Hero) -->
+        <div class="center-hero" id="centerHero">
+          <div class="brand-pill">NISO</div>
+          <h1 class="welcome-heading">
+            Merhaba <span id="userNameDisplay">Emre</span>,<br />
+            Bugün nasıl <span class="accent-text">yardımcı</span> olabilirim?
+          </h1>
+
+          <!-- Component 4: ChatInput (Primary Wide Pill Composer on Welcome) -->
+          <div class="hero-composer-wrapper">
+            <form class="composer" id="heroComposerForm">
+              <button class="icon-btn attach-btn" type="button" id="heroAttachBtn" aria-label="Dosya Ekle" title="Dosya veya belge ekle">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+              <textarea 
+                class="composer-input" 
+                id="heroMessageInput" 
+                placeholder="NISO hakkında bir şey sorun... (Shift+Enter yeni satır)" 
+                rows="1" 
+                maxlength="4000"
+                aria-label="Mesajınızı yazın"
+              ></textarea>
+              <button class="icon-btn voice-btn" type="button" id="heroVoiceBtn" aria-label="Sesli Giriş" title="Sesli komut / dikte">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+              </button>
+              <button class="send-btn" type="submit" id="heroSendBtn" aria-label="Soruyu Gönder" title="Gönder">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </form>
           </div>
 
-          <!-- Starter Prompts -->
-          <div class="starter-section">
-            <span class="starter-title">Hızlı Başlangıç Soruları:</span>
-            <div class="starter-chips">
-              <button class="chip-btn" data-query="Çalışma saatleri ve dress code nedir?">
-                📋 Çalışma saatleri ve dress code nedir?
-              </button>
-              <button class="chip-btn" data-query="Bugün kimler geç kaldı?">
-                ⏱️ Bugün kimler geç kaldı?
-              </button>
-              <button class="chip-btn" data-query="TEMSA projesinde son durum nedir?">
-                🚀 TEMSA projesinde son durum nedir?
-              </button>
-              <button class="chip-btn" data-query="TEMSA ekibindeki gecikmeler ve proje riskini özetle.">
-                📊 TEMSA ekibindeki gecikmeler ve proje riskini özetle.
-              </button>
-            </div>
+          <!-- Component 5: SuggestionCards (Quick starter questions) -->
+          <div class="suggestions-grid" id="suggestionsGrid">
+            <button class="suggestion-card" data-query="TEMSA projesinde son durum">
+              <span class="card-icon">🚀</span>
+              <span class="card-text">TEMSA projesinde son durum</span>
+            </button>
+            <button class="suggestion-card" data-query="Bugün kimler geç kaldı?">
+              <span class="card-icon">⏱️</span>
+              <span class="card-text">Bugün kimler geç kaldı?</span>
+            </button>
+            <button class="suggestion-card" data-query="Çalışma saatleri nelerdir?">
+              <span class="card-icon">📋</span>
+              <span class="card-text">Çalışma saatleri nelerdir?</span>
+            </button>
           </div>
         </div>
+
+        <!-- Active Conversation Messages List -->
+        <div class="conversation-stream" id="conversationStream" style="display: none;">
+          <!-- Messages dynamically appended here -->
+        </div>
+      </section>
+
+      <!-- Loading / Progress Indicator -->
+      <div class="stream-loading-bar" id="streamLoadingBar" style="display: none;" aria-live="polite">
+        <div class="loading-pulse"></div>
+        <span id="loadingStepLabel">Soru sınıflandırılıyor ve kaynaklar taranıyor...</span>
       </div>
-    </main>
 
-    <!-- Loading Indicator Area -->
-    <div class="loading-bar" id="loadingBar" style="display: none;">
-      <div class="spinner"></div>
-      <span id="loadingStep">Soru sınıflandırılıyor...</span>
-    </div>
-
-    <!-- Input Footer -->
-    <footer class="app-footer">
-      <div class="input-box-container">
-        <textarea 
-          id="userInput" 
-          placeholder="Şirket verileri hakkında bir soru sorun... (Shift+Enter yeni satır)" 
-          rows="1"
-          maxlength="4000"
-        ></textarea>
-        <div class="input-actions">
-          <span class="char-counter" id="charCounter">0 / 4000</span>
-          <button id="sendBtn" class="send-btn" title="Gönder">
-            <span>Gönder</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <!-- Bottom Pinned Composer (Shown during active conversation) -->
+      <div class="bottom-composer-container" id="bottomComposerContainer" style="display: none;">
+        <form class="composer bottom-composer" id="bottomComposerForm">
+          <button class="icon-btn attach-btn" type="button" id="bottomAttachBtn" aria-label="Dosya Ekle" title="Dosya ekle">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+          <textarea 
+            class="composer-input" 
+            id="bottomMessageInput" 
+            placeholder="Takip sorusu veya yeni bir konu sorun..." 
+            rows="1" 
+            maxlength="4000"
+            aria-label="Takip mesajı yazın"
+          ></textarea>
+          <button class="icon-btn voice-btn" type="button" id="bottomVoiceBtn" aria-label="Sesli Giriş" title="Sesli komut">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </button>
+          <button class="send-btn" type="submit" id="bottomSendBtn" aria-label="Gönder" title="Gönder">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
+        </form>
+      </div>
+
+      <!-- Footer Note -->
+      <footer class="app-footer-note">
+        <span>Yanıtlar şirket içi kaynaklardan (İK, Puantaj SQL ve Proje RAG) oluşturulur.</span>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Hidden File Input for attachments -->
+  <input type="file" id="filePicker" style="display: none;" multiple accept=".txt,.pdf,.docx,.xlsx,.csv,.png,.jpg" />
+
+  <!-- History Drawer / Modal -->
+  <div class="modal-backdrop" id="historyModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Sohbet Geçmişi</h3>
+        <button class="close-modal-btn" id="closeHistoryBtn" aria-label="Kapat">&times;</button>
+      </div>
+      <div class="modal-body" id="historyList">
+        <!-- History items dynamically populated -->
+      </div>
+      <div class="modal-footer">
+        <button class="clear-history-btn" id="clearHistoryBtn">Geçmişi Temizle</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info Modal -->
+  <div class="modal-backdrop" id="infoModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Sistem ve Entegrasyon Durumu</h3>
+        <button class="close-modal-btn" id="closeInfoBtn" aria-label="Kapat">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="info-item">
+          <strong>Yapay Zekâ Modeli:</strong> <span>Qwen 3.5 (9B) — Yerel Ollama</span>
+        </div>
+        <div class="info-item">
+          <strong>Embedding Modeli:</strong> <span>Qwen3-Embedding (0.6B)</span>
+        </div>
+        <div class="info-item">
+          <strong>Veritabanı & Vektör:</strong> <span>PostgreSQL 17 & PGVector (Docker)</span>
+        </div>
+        <div class="info-item">
+          <strong>Gmail Ingestion:</strong> <span class="badge-status-online">Aktif (eldornisoai@gmail.com)</span>
+        </div>
+        <div class="info-item">
+          <strong>Outlook Ingestion:</strong> <span class="badge-status-idle">Pasif Adaptör (Beklemede)</span>
+        </div>
+        <div class="info-item">
+          <strong>Gizlilik & Güvenlik:</strong> <span>Tamamen yerel, bulut API çağrısız izole ağ</span>
+        </div>
+        <div class="info-item">
+          <strong>Oturum ID:</strong> <code id="sessionInfoDisplay">...</code>
         </div>
       </div>
-      <div class="footer-privacy-note">
-        Yerel ağda izole çalışır. Dış servis ve bulut API çağrısı yapılmaz. Session ID: <span id="sessionDisplay">...</span>
-      </div>
-    </footer>
+    </div>
   </div>
 
   <script src="app.js"></script>
