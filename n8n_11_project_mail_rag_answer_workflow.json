@@ -1,0 +1,225 @@
+{
+  "updatedAt": "2026-09-01T13:08:23.784Z",
+  "createdAt": "2026-09-01T13:08:23.784Z",
+  "id": "aopNq0brScuCKrU7",
+  "name": "11_Project_Mail_RAG_Answer",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-subworkflow",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst question = item.question || item.query || item.prompt || '';\nconst qLower = question.toLowerCase();\n\nlet projectFilter = null;\nif (qLower.includes('temsa')) projectFilter = 'PRJ-TEMSA';\nelse if (qLower.includes('vortex')) projectFilter = 'PRJ-VORTEX';\nelse if (qLower.includes('eldor') || qLower.includes('obc')) projectFilter = 'PRJ-ELDOR-OBC';\nelse if (qLower.includes('akıllı fabrika') || qLower.includes('kestirimci')) projectFilter = 'PRJ-SMART-FACTORY';\nelse if (qLower.includes('autosar')) projectFilter = 'PRJ-AUTOSAR-ECU';\n\nreturn [{\n  json: {\n    question: question,\n    project_filter: projectFilter\n  }\n}];"
+      },
+      "id": "normalize-project-query",
+      "name": "Normalize Question & Extract Project",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-embedding:0.6b\",\n  \"prompt\": {{ JSON.stringify($json.question) }}\n}",
+        "options": {}
+      },
+      "id": "generate-query-embedding",
+      "name": "Generate Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.id AS chunk_id, d.title AS subject, d.sender_address AS from_address, d.received_at, d.project_code, d.metadata->>'project_name' AS project_name, c.content, 1 - (c.embedding <=> $1::vector) AS similarity FROM rag.chunk c JOIN rag.document d ON c.document_id = d.id WHERE d.source_type = 'EMAIL' AND ($2::text IS NULL OR d.project_code = $2) ORDER BY c.embedding <=> $1::vector ASC LIMIT 5;",
+        "options": {
+          "queryReplacement": "={{ [\n  '[' + $json.embedding.join(',') + ']',\n  $('Normalize Question & Extract Project').first().json.project_filter\n] }}"
+        }
+      },
+      "id": "pgvector-retrieval",
+      "name": "PGVector Email Retrieval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst question = $('Normalize Question & Extract Project').first().json.question;\n\nif (!items || items.length === 0 || !items[0].json.content) {\n  return [{\n    json: {\n      question: question,\n      context: 'Herhangi bir ilgili proje e-postası bulunamadı.',\n      sources: [],\n      skip_llm: true\n    }\n  }];\n}\n\nlet contextText = '';\nconst sources = [];\nitems.forEach((item, idx) => {\n  const row = item.json;\n  contextText += `--- E-POSTA ${idx + 1} ---\\n`;\n  contextText += `Konu: ${row.subject}\\nGönderen: ${row.from_address}\\nTarih: ${row.received_at}\\nProje: ${row.project_name} (${row.project_code})\\nİçerik:\\n${row.content}\\n\\n`;\n  sources.push({\n    subject: row.subject,\n    from: row.from_address,\n    date: row.received_at,\n    project: row.project_code,\n    similarity: row.similarity\n  });\n});\n\nconst prompt = `Sen Eldor/NISO AI kurumsal yönetim asistanısın. Aşağıdaki doğrulanmış şirket içi proje e-postalarını inceleyerek yöneticinin sorusunu Türkçe olarak profesyonelce cevapla.\\n\\nKURAL:\\n1. Yalnızca verilen e-posta bağlamındaki gerçek bilgilere dayan.\\n2. Bilmediğin veya bağlamda olmayan konularda asla tahmin yapma.\\n3. Kararları, açık riskleri, teslim tarihlerini ve aksiyon sahiplerini maddeler halinde net belirt.\\n\\nE-POSTA BAĞLAMI:\\n${contextText}\\nSORU: ${question}\\n\\nCEVAP:`;\n\nreturn [{\n  json: {\n    question: question,\n    prompt: prompt,\n    sources: sources,\n    skip_llm: false\n  }\n}];"
+      },
+      "id": "build-prompt",
+      "name": "Build Context & Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"prompt\": {{ JSON.stringify($json.prompt) }},\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.1,\n    \"top_p\": 0.9\n  }\n}",
+        "options": {}
+      },
+      "id": "generate-answer",
+      "name": "Qwen3.5-9B Answer Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const promptItem = $('Build Context & Prompt').first().json;\nconst llmRes = $input.first()?.json || {};\n\nlet answer = (llmRes.response || '').trim();\nif (!answer && llmRes.thinking) {\n  const match = llmRes.thinking.match(/(\\n\\*\\*[A-ZÇĞİÖŞÜ][\\s\\S]+)/i) || llmRes.thinking.match(/(\\n#[\\s\\S]+)/i);\n  if (match) answer = match[0].trim();\n}\nif (!answer) {\n  answer = promptItem.sources && promptItem.sources.length > 0\n    ? `**Proje E-posta Özeti:**\\n` + promptItem.sources.map(s => `- **${s.subject}** (${s.project || 'Genel'})`).join('\\n')\n    : 'İlgili e-postalara ulaşılamadı veya cevap üretilemedi.';\n}\n\nreturn [{\n  json: {\n    status: 'SUCCESS',\n    intent: 'PROJECT_MAIL',\n    title: 'Proje E-postası (RAG)',\n    answer: answer,\n    route_used: 'PROJECT_MAIL',\n    sources: promptItem.sources || [],\n    source_count: promptItem.sources ? promptItem.sources.length : 0,\n    is_synthetic: promptItem.sources ? promptItem.sources.some(s => s.reference_id && String(s.reference_id).startsWith('MSG-gm_th_')) : false,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "format-rag-result",
+      "name": "Format Structured Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Question & Extract Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Question & Extract Project": {
+      "main": [
+        [
+          {
+            "node": "Generate Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "PGVector Email Retrieval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PGVector Email Retrieval": {
+      "main": [
+        [
+          {
+            "node": "Build Context & Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context & Prompt": {
+      "main": [
+        [
+          {
+            "node": "Qwen3.5-9B Answer Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen3.5-9B Answer Generator": {
+      "main": [
+        [
+          {
+            "node": "Format Structured Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "41b40b87-736b-40cb-a028-d3298a2a0101",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.785Z",
+      "createdAt": "2026-09-01T13:08:23.785Z",
+      "role": "workflow:owner",
+      "workflowId": "aopNq0brScuCKrU7",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

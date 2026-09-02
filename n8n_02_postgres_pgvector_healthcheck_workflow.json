@@ -1,266 +1,296 @@
-[
-  {
-    "id": "postgresPgvectorHealthcheck02",
-    "name": "02_Postgres_PGVector_Healthcheck",
-    "active": false,
-    "isArchived": false,
-    "nodes": [
-      {
-        "parameters": {},
-        "type": "n8n-nodes-base.manualTrigger",
-        "typeVersion": 1,
-        "position": [
-          0,
-          0
-        ],
-        "id": "5f5b60d0-d3c2-46e5-93ef-156e56f56fd9",
-        "name": "Manual Trigger"
+{
+  "updatedAt": "2026-09-01T13:08:23.746Z",
+  "createdAt": "2026-09-01T13:08:23.746Z",
+  "id": "postgresPgvectorHealthcheck02",
+  "name": "02_Postgres_PGVector_Healthcheck",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "5f5b60d0-d3c2-46e5-93ef-156e56f56fd9",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT current_database() AS database, current_user AS db_user, version() AS postgres_version, current_timestamp AS db_timestamp;",
+        "options": {}
       },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "SELECT current_database() AS database, current_user AS db_user, version() AS postgres_version, current_timestamp AS db_timestamp;",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          240,
-          0
-        ],
-        "id": "63451ec9-e41e-4c94-b423-2aeb8bedb986",
-        "name": "Postgres Connection Test",
-        "credentials": {
-          "postgres": {
-            "id": "postgresManagementAi01",
-            "name": "PostgreSQL Management AI"
-          }
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        0
+      ],
+      "id": "63451ec9-e41e-4c94-b423-2aeb8bedb986",
+      "name": "Postgres Connection Test",
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
         }
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_present, COALESCE((SELECT extversion FROM pg_extension WHERE extname = 'vector'), '') AS pgvector_version;",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          500,
-          0
-        ],
-        "id": "b2f2ef0f-8454-4ee2-a085-2eb8e0d2995a",
-        "name": "Vector Extension Check",
-        "credentials": {
-          "postgres": {
-            "id": "postgresManagementAi01",
-            "name": "PostgreSQL Management AI"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "WITH expected(schema_name) AS (VALUES ('hr'), ('rag'), ('mail'), ('attendance'), ('audit')), found AS (SELECT s.schema_name FROM information_schema.schemata s JOIN expected e ON e.schema_name = s.schema_name), schema_info AS (SELECT COUNT(*)::int AS schema_count, COALESCE(string_agg(schema_name, ',' ORDER BY schema_name), '') AS schemas FROM found), vector_info AS (SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_present, COALESCE((SELECT extversion FROM pg_extension WHERE extname = 'vector'), '') AS pgvector_version) SELECT current_database() AS database, current_user AS db_user, version() AS postgres_version, vector_info.vector_present, vector_info.pgvector_version, schema_info.schemas, schema_info.schema_count, (current_database() = 'management_ai' AND current_user = 'management_admin' AND vector_info.vector_present AND schema_info.schema_count = 5) AS success, current_timestamp AS db_timestamp FROM schema_info CROSS JOIN vector_info;",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          760,
-          0
-        ],
-        "id": "5f359fd3-8be7-4ed7-9f15-bb9f9c0d760f",
-        "name": "Schema Check",
-        "credentials": {
-          "postgres": {
-            "id": "postgresManagementAi01",
-            "name": "PostgreSQL Management AI"
-          }
-        }
-      },
-      {
-        "parameters": {
-          "conditions": {
-            "boolean": [
-              {
-                "value1": "={{ $json.success }}",
-                "operation": "equal",
-                "value2": true
-              }
-            ]
-          },
-          "combineOperation": "all"
-        },
-        "type": "n8n-nodes-base.if",
-        "typeVersion": 1,
-        "position": [
-          1020,
-          0
-        ],
-        "id": "c7a5c8ee-3d8c-48ad-95e6-a4f8f2185663",
-        "name": "IF"
-      },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "status",
-                "type": "stringValue",
-                "stringValue": "SUCCESS"
-              },
-              {
-                "name": "postgres_version",
-                "type": "stringValue",
-                "stringValue": "={{ $json.postgres_version }}"
-              },
-              {
-                "name": "pgvector_version",
-                "type": "stringValue",
-                "stringValue": "={{ $json.pgvector_version }}"
-              },
-              {
-                "name": "schemas",
-                "type": "stringValue",
-                "stringValue": "={{ $json.schemas }}"
-              },
-              {
-                "name": "tested_at",
-                "type": "stringValue",
-                "stringValue": "={{ $now.toISO() }}"
-              }
-            ]
-          },
-          "include": "none",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1280,
-          -100
-        ],
-        "id": "5990d86a-7ffe-4dc5-9157-56ec0606d59a",
-        "name": "Success Edit Fields"
-      },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "status",
-                "type": "stringValue",
-                "stringValue": "FAILED"
-              },
-              {
-                "name": "postgres_version",
-                "type": "stringValue",
-                "stringValue": "={{ $json.postgres_version || '' }}"
-              },
-              {
-                "name": "pgvector_version",
-                "type": "stringValue",
-                "stringValue": "={{ $json.pgvector_version || '' }}"
-              },
-              {
-                "name": "schemas",
-                "type": "stringValue",
-                "stringValue": "={{ $json.schemas || '' }}"
-              },
-              {
-                "name": "tested_at",
-                "type": "stringValue",
-                "stringValue": "={{ $now.toISO() }}"
-              }
-            ]
-          },
-          "include": "none",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1280,
-          120
-        ],
-        "id": "fc9f78f2-9f94-45dd-a766-f5eef07807a9",
-        "name": "Failed Edit Fields"
-      }
-    ],
-    "connections": {
-      "Manual Trigger": {
-        "main": [
-          [
-            {
-              "node": "Postgres Connection Test",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Postgres Connection Test": {
-        "main": [
-          [
-            {
-              "node": "Vector Extension Check",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Vector Extension Check": {
-        "main": [
-          [
-            {
-              "node": "Schema Check",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Schema Check": {
-        "main": [
-          [
-            {
-              "node": "IF",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "IF": {
-        "main": [
-          [
-            {
-              "node": "Success Edit Fields",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Failed Edit Fields",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
       }
     },
-    "settings": {
-      "executionOrder": "v1"
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_present, COALESCE((SELECT extversion FROM pg_extension WHERE extname = 'vector'), '') AS pgvector_version;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        500,
+        0
+      ],
+      "id": "b2f2ef0f-8454-4ee2-a085-2eb8e0d2995a",
+      "name": "Vector Extension Check",
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
     },
-    "staticData": null,
-    "meta": {},
-    "nodeGroups": [],
-    "pinData": {},
-    "tags": []
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH expected(schema_name) AS (VALUES ('hr'), ('rag'), ('mail'), ('attendance'), ('audit')), found AS (SELECT s.schema_name FROM information_schema.schemata s JOIN expected e ON e.schema_name = s.schema_name), schema_info AS (SELECT COUNT(*)::int AS schema_count, COALESCE(string_agg(schema_name, ',' ORDER BY schema_name), '') AS schemas FROM found), vector_info AS (SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_present, COALESCE((SELECT extversion FROM pg_extension WHERE extname = 'vector'), '') AS pgvector_version) SELECT current_database() AS database, current_user AS db_user, version() AS postgres_version, vector_info.vector_present, vector_info.pgvector_version, schema_info.schemas, schema_info.schema_count, (current_database() = 'management_ai' AND current_user = 'management_admin' AND vector_info.vector_present AND schema_info.schema_count = 5) AS success, current_timestamp AS db_timestamp FROM schema_info CROSS JOIN vector_info;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        760,
+        0
+      ],
+      "id": "5f359fd3-8be7-4ed7-9f15-bb9f9c0d760f",
+      "name": "Schema Check",
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1020,
+        0
+      ],
+      "id": "c7a5c8ee-3d8c-48ad-95e6-a4f8f2185663",
+      "name": "IF"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "type": "stringValue",
+              "stringValue": "SUCCESS"
+            },
+            {
+              "name": "postgres_version",
+              "type": "stringValue",
+              "stringValue": "={{ $json.postgres_version }}"
+            },
+            {
+              "name": "pgvector_version",
+              "type": "stringValue",
+              "stringValue": "={{ $json.pgvector_version }}"
+            },
+            {
+              "name": "schemas",
+              "type": "stringValue",
+              "stringValue": "={{ $json.schemas }}"
+            },
+            {
+              "name": "tested_at",
+              "type": "stringValue",
+              "stringValue": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        1280,
+        -100
+      ],
+      "id": "5990d86a-7ffe-4dc5-9157-56ec0606d59a",
+      "name": "Success Edit Fields"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "type": "stringValue",
+              "stringValue": "FAILED"
+            },
+            {
+              "name": "postgres_version",
+              "type": "stringValue",
+              "stringValue": "={{ $json.postgres_version || '' }}"
+            },
+            {
+              "name": "pgvector_version",
+              "type": "stringValue",
+              "stringValue": "={{ $json.pgvector_version || '' }}"
+            },
+            {
+              "name": "schemas",
+              "type": "stringValue",
+              "stringValue": "={{ $json.schemas || '' }}"
+            },
+            {
+              "name": "tested_at",
+              "type": "stringValue",
+              "stringValue": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        1280,
+        120
+      ],
+      "id": "fc9f78f2-9f94-45dd-a766-f5eef07807a9",
+      "name": "Failed Edit Fields"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Postgres Connection Test",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Connection Test": {
+      "main": [
+        [
+          {
+            "node": "Vector Extension Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Extension Check": {
+      "main": [
+        [
+          {
+            "node": "Schema Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schema Check": {
+      "main": [
+        [
+          {
+            "node": "IF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF": {
+      "main": [
+        [
+          {
+            "node": "Success Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Failed Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "08b8cd6e-4fc1-4c5e-89c8-a1817ed854c7",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.747Z",
+      "createdAt": "2026-09-01T13:08:23.747Z",
+      "role": "workflow:owner",
+      "workflowId": "postgresPgvectorHealthcheck02",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
   }
-]
+}

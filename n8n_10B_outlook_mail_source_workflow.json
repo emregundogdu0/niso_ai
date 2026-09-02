@@ -1,6 +1,11 @@
 {
+  "updatedAt": "2026-09-01T13:08:23.773Z",
+  "createdAt": "2026-09-01T13:08:23.773Z",
+  "id": "Tol7bGYEacspOQzs",
   "name": "10B_Outlook_Mail_Source",
+  "description": null,
   "active": false,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {
@@ -11,36 +16,51 @@
             }
           ]
         },
-        "filters": {
-          "fetchOnlyUnread": true
-        }
+        "filters": {}
       },
       "id": "outlook-trigger",
       "name": "Microsoft Outlook Trigger (Inactive Placeholder)",
       "type": "n8n-nodes-base.microsoftOutlookTrigger",
       "typeVersion": 1,
-      "position": [250, 300],
-      "notes": "MANUEL KURULUM REHBERİ:\n1. Azure Entra ID üzerinden 'Mail.Read' yetkisine sahip bir App Registration oluşturun.\n2. n8n Credentials alanına 'Outlook Company Bot' adıyla OAuth 2.0 credential'ını kaydedin.\n3. Bu trigger düğümünde şirket bot e-posta adresini seçin.\n4. Workflow'u 'Active' duruma getirin.\n(Ortak işleme hattında ve veritabanında hiçbir değişiklik gerekmeyecektir)."
+      "position": [
+        256,
+        304
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\n\n// Transform Microsoft Outlook / Graph API raw response to Common Mail Message Schema\nconst commonMessage = {\n  provider: 'OUTLOOK',\n  mailbox_address: item.parentFolderId || 'OUTLOOK_BOT_EMAIL_ADDRESS',\n  provider_message_id: item.id,\n  provider_thread_id: item.conversationId,\n  internet_message_id: item.internetMessageId,\n  from_address: item.from?.emailAddress?.address || '',\n  from_name: item.from?.emailAddress?.name || '',\n  to_addresses: (item.toRecipients || []).map(r => r.emailAddress?.address).filter(Boolean),\n  cc_addresses: (item.ccRecipients || []).map(r => r.emailAddress?.address).filter(Boolean),\n  bcc_visible: false,\n  reply_to_address: item.replyTo?.[0]?.emailAddress?.address || null,\n  subject: item.subject || '(Başlıksız E-posta)',\n  received_at: item.receivedDateTime ? new Date(item.receivedDateTime).toISOString() : new Date().toISOString(),\n  sent_at: item.sentDateTime ? new Date(item.sentDateTime).toISOString() : new Date().toISOString(),\n  in_reply_to: item.inReplyTo || null,\n  references: null,\n  labels_or_categories: item.categories || [],\n  plain_text_body: item.bodyPreview || '',\n  html_body: item.body?.contentType === 'html' ? item.body?.content : '',\n  attachment_metadata: (item.attachments || []).map(att => ({\n    filename: att.name,\n    mime_type: att.contentType,\n    size: att.size,\n    attachment_id: att.id\n  })),\n  raw_metadata: {\n    importance: item.importance,\n    is_read: item.isRead\n  },\n  source_trigger: 'MICROSOFT_GRAPH_POLLING',\n  ingested_at: new Date().toISOString()\n};\n\nreturn [{ json: commonMessage }];"
+        "jsCode": "const item = $input.first().json;\n\n// Transform Outlook raw response to Common Mail Message Schema\nconst commonMessage = {\n  provider: 'OUTLOOK',\n  mailbox_address: 'management-bot@eldor.com.tr',\n  provider_message_id: item.id,\n  provider_thread_id: item.conversationId,\n  internet_message_id: item.internetMessageId,\n  from_address: item.from?.emailAddress?.address || '',\n  from_name: item.from?.emailAddress?.name || '',\n  to_addresses: (item.toRecipients || []).map(r => r.emailAddress?.address),\n  cc_addresses: (item.ccRecipients || []).map(r => r.emailAddress?.address),\n  bcc_visible: false,\n  reply_to_address: item.replyTo?.[0]?.emailAddress?.address || null,\n  subject: item.subject || '(Konusuz E-posta)',\n  received_at: item.receivedDateTime || new Date().toISOString(),\n  sent_at: item.sentDateTime || new Date().toISOString(),\n  in_reply_to: null,\n  references: null,\n  labels_or_categories: item.categories || [],\n  plain_text_body: item.bodyPreview || item.body?.content || '',\n  html_body: item.body?.contentType === 'html' ? item.body.content : '',\n  attachment_metadata: (item.attachments || []).map(att => ({\n    filename: att.name,\n    mime_type: att.contentType,\n    size: att.size,\n    attachment_id: att.id\n  })),\n  raw_metadata: {\n    importance: item.importance,\n    is_read: item.isRead\n  },\n  source_trigger: 'OUTLOOK_POLLING',\n  ingested_at: new Date().toISOString()\n};\n\nreturn [{ json: commonMessage }];"
       },
-      "id": "transform-outlook-to-common-schema",
+      "id": "transform-outlook-schema",
       "name": "Transform Outlook to Common Schema",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300]
+      "position": [
+        480,
+        304
+      ]
     },
     {
       "parameters": {
-        "workflowId": "commonMailIngestion10C"
+        "workflowId": {
+          "__rl": true,
+          "value": "a4o1zq8xsRaRQv7b",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/a4o1zq8xsRaRQv7b",
+          "cachedResultName": "10C_Common_Mail_Ingestion"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
       },
-      "id": "send-to-common-ingestion",
-      "name": "Send to 10C Common Ingestion Pipeline",
       "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1,
-      "position": [720, 300]
+      "typeVersion": 1.3,
+      "position": [
+        704,
+        304
+      ],
+      "id": "send-to-common-ingestion",
+      "name": "Send to 10C Common Ingestion Pipeline"
     }
   ],
   "connections": {
@@ -69,5 +89,39 @@
   },
   "settings": {
     "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "6250c96b-6e77-44a4-b07e-098cddd506c7",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.775Z",
+      "createdAt": "2026-09-01T13:08:23.775Z",
+      "role": "workflow:owner",
+      "workflowId": "Tol7bGYEacspOQzs",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
   }
 }

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yönetim Bilgi Asistanı</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-badge">NISO & ELDOR AI</div>
+        <div class="title-group">
+          <h1>Yönetim Bilgi Asistanı</h1>
+          <p class="subtitle">İK politikaları, devam verileri ve proje güncellemeleri için şirket içi karar destek asistanı</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="status-pill status-secure">
+          <span class="dot"></span> Yerel ve Güvenli
+        </div>
+        <div class="status-pill status-model">
+          Model: <strong>Qwen3.5-9B</strong>
+        </div>
+        <div class="provider-badges">
+          <span class="provider-badge provider-gmail active" title="Gmail: Aktif (eldornisoai@gmail.com)">Gmail: Aktif</span>
+          <span class="provider-badge provider-outlook passive" title="Outlook: Henüz yapılandırılmadı (Pasif Placeholder)">Outlook: Yapılandırılmadı</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+      <div class="chat-messages" id="chatMessages">
+        <!-- Welcome Card -->
+        <div class="welcome-card" id="welcomeCard">
+          <div class="welcome-icon">🏢</div>
+          <h2>Yönetim Bilgi Asistanına Hoş Geldiniz</h2>
+          <p>Şirket içi İK politikaları, çalışan devam/yoklama durumu ve proje e-posta yazışmaları hakkında sorularınızı iletebilirsiniz.</p>
+          <div class="disclaimer-banner">
+            <span class="alert-icon">ℹ️</span>
+            <span>Bu MVP sentetik verilerle çalışır. Yanıtlar karar destek amaçlıdır.</span>
+          </div>
+
+          <!-- Starter Prompts -->
+          <div class="starter-section">
+            <span class="starter-title">Hızlı Başlangıç Soruları:</span>
+            <div class="starter-chips">
+              <button class="chip-btn" data-query="Çalışma saatleri ve dress code nedir?">
+                📋 Çalışma saatleri ve dress code nedir?
+              </button>
+              <button class="chip-btn" data-query="Bugün kimler geç kaldı?">
+                ⏱️ Bugün kimler geç kaldı?
+              </button>
+              <button class="chip-btn" data-query="TEMSA projesinde son durum nedir?">
+                🚀 TEMSA projesinde son durum nedir?
+              </button>
+              <button class="chip-btn" data-query="TEMSA ekibindeki gecikmeler ve proje riskini özetle.">
+                📊 TEMSA ekibindeki gecikmeler ve proje riskini özetle.
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Loading Indicator Area -->
+    <div class="loading-bar" id="loadingBar" style="display: none;">
+      <div class="spinner"></div>
+      <span id="loadingStep">Soru sınıflandırılıyor...</span>
+    </div>
+
+    <!-- Input Footer -->
+    <footer class="app-footer">
+      <div class="input-box-container">
+        <textarea 
+          id="userInput" 
+          placeholder="Şirket verileri hakkında bir soru sorun... (Shift+Enter yeni satır)" 
+          rows="1"
+          maxlength="4000"
+        ></textarea>
+        <div class="input-actions">
+          <span class="char-counter" id="charCounter">0 / 4000</span>
+          <button id="sendBtn" class="send-btn" title="Gönder">
+            <span>Gönder</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="footer-privacy-note">
+        Yerel ağda izole çalışır. Dış servis ve bulut API çağrısı yapılmaz. Session ID: <span id="sessionDisplay">...</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

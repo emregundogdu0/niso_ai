@@ -110,11 +110,20 @@ async function generateAttendanceData(seed = 42) {
   `;
   runPsql(empShiftSql);
 
-  // 4. Setup 60 Calendar Days (2026-01-01 to 2026-03-01)
-  console.log('4. Generating 60 Calendar Days (2026-01-01 to 2026-03-01)...');
+  // 4. Setup Calendar Days (2026-01-01 to 2026-09-30)
+  console.log('4. Generating Calendar Days (2026-01-01 to 2026-09-30)...');
   const calendarValues = [];
   const startDate = new Date('2026-01-01T00:00:00Z');
-  const totalDays = 60;
+  const totalDays = 273; // Until 2026-09-30
+
+  const holidays = {
+    '2026-01-01': 'Yılbaşı Resmî Tatili',
+    '2026-04-23': '23 Nisan Ulusal Egemenlik ve Çocuk Bayramı',
+    '2026-05-01': '1 Mayıs Emek ve Dayanışma Günü',
+    '2026-05-19': '19 Mayıs Atatürkü Anma, Gençlik ve Spor Bayramı',
+    '2026-07-15': '15 Temmuz Demokrasi ve Milli Birlik Günü',
+    '2026-08-30': '30 Ağustos Zafer Bayramı'
+  };
 
   for (let d = 0; d < totalDays; d++) {
     const curDate = new Date(startDate.getTime() + d * 24 * 60 * 60 * 1000);
@@ -125,10 +134,10 @@ async function generateAttendanceData(seed = 42) {
     let isHoliday = false;
     let desc = 'İş Günü';
 
-    if (dateStr === '2026-01-01') {
+    if (holidays[dateStr]) {
       isWorkday = false;
       isHoliday = true;
-      desc = 'Yılbaşı Resmî Tatili';
+      desc = holidays[dateStr];
     } else if (dayOfWeek === 0 || dayOfWeek === 6) {
       isWorkday = false;
       desc = dayOfWeek === 6 ? 'Cumartesi Hafta Sonu' : 'Pazar Hafta Sonu';

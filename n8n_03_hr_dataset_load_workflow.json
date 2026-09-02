@@ -1,223 +1,253 @@
-[
-  {
-    "id": "hrDatasetLoad03",
-    "name": "03_HR_Dataset_Load",
-    "active": false,
-    "isArchived": false,
-    "nodes": [
-      {
-        "parameters": {},
-        "type": "n8n-nodes-base.manualTrigger",
-        "typeVersion": 1,
-        "position": [
-          0,
-          0
-        ],
-        "id": "d735fb04-9ba8-45bb-9948-5f09ec159fb1",
-        "name": "Manual Trigger"
+{
+  "updatedAt": "2026-09-01T13:08:23.749Z",
+  "createdAt": "2026-09-01T13:08:23.749Z",
+  "id": "hrDatasetLoad03",
+  "name": "03_HR_Dataset_Load",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "d735fb04-9ba8-45bb-9948-5f09ec159fb1",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "filePath": "/home/node/.n8n-files/hr_policy_dataset_100.jsonl",
+        "dataPropertyName": "data"
       },
-      {
-        "parameters": {
-          "filePath": "/home/node/.n8n-files/hr_policy_dataset_100.jsonl",
-          "dataPropertyName": "data"
-        },
-        "type": "n8n-nodes-base.readBinaryFile",
-        "typeVersion": 1,
-        "position": [
-          240,
-          0
-        ],
-        "id": "5900ffcf-9e34-43ec-872b-32f6c10e94f0",
-        "name": "Read/Load Dataset"
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        240,
+        0
+      ],
+      "id": "5900ffcf-9e34-43ec-872b-32f6c10e94f0",
+      "name": "Read/Load Dataset"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst content = buffer.toString('utf8');\nconst lines = content.split(/\\r?\\n/).filter((line) => line.trim().length > 0);\nconst records = lines.map((line, index) => {\n  try {\n    return JSON.parse(line);\n  } catch (error) {\n    throw new Error(`Invalid JSONL at line ${index + 1}: ${error.message}`);\n  }\n});\n\nconst required = [\n  'policy_code',\n  'category',\n  'canonical_question',\n  'answer_text',\n  'paraphrases',\n  'conditions',\n  'effective_from',\n  'effective_to',\n  'version',\n  'source_title',\n  'source_section',\n  'owner',\n  'approved',\n  'sensitivity',\n  'synthetic'\n];\n\nif (records.length !== 100) {\n  throw new Error(`Dataset must contain exactly 100 records, found ${records.length}.`);\n}\n\nconst codes = new Set();\nconst categories = new Set();\nfor (const record of records) {\n  for (const field of required) {\n    if (!(field in record)) throw new Error(`${record.policy_code || 'UNKNOWN'} missing required field ${field}.`);\n  }\n  if (!/^HR-\\d{3}$/.test(record.policy_code)) throw new Error(`${record.policy_code} does not match HR-001 format.`);\n  if (codes.has(record.policy_code)) throw new Error(`Duplicate policy_code ${record.policy_code}.`);\n  codes.add(record.policy_code);\n  categories.add(record.category);\n  if (!Array.isArray(record.paraphrases) || record.paraphrases.length < 3) throw new Error(`${record.policy_code} must have at least 3 paraphrases.`);\n  if (record.synthetic !== true) throw new Error(`${record.policy_code} synthetic must be true.`);\n  if (record.approved !== true) throw new Error(`${record.policy_code} approved must be true for this demo dataset.`);\n  if (record.source_title !== 'Sentetik İK Politikası') throw new Error(`${record.policy_code} has invalid source_title.`);\n  const from = Date.parse(record.effective_from);\n  if (Number.isNaN(from)) throw new Error(`${record.policy_code} effective_from is invalid.`);\n  if (record.effective_to !== null) {\n    const to = Date.parse(record.effective_to);\n    if (Number.isNaN(to) || to < from) throw new Error(`${record.policy_code} effective_to is before effective_from.`);\n  }\n}\n\nif (categories.size < 15) throw new Error(`Dataset must contain at least 15 categories, found ${categories.size}.`);\n\nreturn [{\n  json: {\n    dataset_total: records.length,\n    unique_policy_codes: codes.size,\n    category_count: categories.size,\n    records_json: JSON.stringify(records)\n  }\n}];"
       },
-      {
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "language": "javaScript",
-          "jsCode": "const buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst content = buffer.toString('utf8');\nconst lines = content.split(/\\r?\\n/).filter((line) => line.trim().length > 0);\nconst records = lines.map((line, index) => {\n  try {\n    return JSON.parse(line);\n  } catch (error) {\n    throw new Error(`Invalid JSONL at line ${index + 1}: ${error.message}`);\n  }\n});\n\nconst required = [\n  'policy_code',\n  'category',\n  'canonical_question',\n  'answer_text',\n  'paraphrases',\n  'conditions',\n  'effective_from',\n  'effective_to',\n  'version',\n  'source_title',\n  'source_section',\n  'owner',\n  'approved',\n  'sensitivity',\n  'synthetic'\n];\n\nif (records.length !== 100) {\n  throw new Error(`Dataset must contain exactly 100 records, found ${records.length}.`);\n}\n\nconst codes = new Set();\nconst categories = new Set();\nfor (const record of records) {\n  for (const field of required) {\n    if (!(field in record)) throw new Error(`${record.policy_code || 'UNKNOWN'} missing required field ${field}.`);\n  }\n  if (!/^HR-\\d{3}$/.test(record.policy_code)) throw new Error(`${record.policy_code} does not match HR-001 format.`);\n  if (codes.has(record.policy_code)) throw new Error(`Duplicate policy_code ${record.policy_code}.`);\n  codes.add(record.policy_code);\n  categories.add(record.category);\n  if (!Array.isArray(record.paraphrases) || record.paraphrases.length < 3) throw new Error(`${record.policy_code} must have at least 3 paraphrases.`);\n  if (record.synthetic !== true) throw new Error(`${record.policy_code} synthetic must be true.`);\n  if (record.approved !== true) throw new Error(`${record.policy_code} approved must be true for this demo dataset.`);\n  if (record.source_title !== 'Sentetik İK Politikası') throw new Error(`${record.policy_code} has invalid source_title.`);\n  const from = Date.parse(record.effective_from);\n  if (Number.isNaN(from)) throw new Error(`${record.policy_code} effective_from is invalid.`);\n  if (record.effective_to !== null) {\n    const to = Date.parse(record.effective_to);\n    if (Number.isNaN(to) || to < from) throw new Error(`${record.policy_code} effective_to is before effective_from.`);\n  }\n}\n\nif (categories.size < 15) throw new Error(`Dataset must contain at least 15 categories, found ${categories.size}.`);\n\nreturn [{\n  json: {\n    dataset_total: records.length,\n    unique_policy_codes: codes.size,\n    category_count: categories.size,\n    records_json: JSON.stringify(records)\n  }\n}];"
-        },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          500,
-          0
-        ],
-        "id": "15600ec0-af47-4e14-95f7-40838d38b50b",
-        "name": "Validate Fields"
-      },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "WITH payload AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(policy_code text, category text, canonical_question text, answer_text text, paraphrases jsonb, conditions jsonb, effective_from date, effective_to date, version integer, source_title text, source_section text, owner text, approved boolean, sensitivity text, synthetic boolean)), upserted AS (INSERT INTO hr.policy_item (policy_code, category, canonical_question, answer_text, paraphrases, conditions, effective_from, effective_to, version, source_title, source_section, owner, approved, sensitivity, synthetic) SELECT policy_code, category, canonical_question, answer_text, paraphrases, conditions, effective_from, effective_to, version, source_title, source_section, owner, approved, sensitivity, synthetic FROM payload ON CONFLICT (policy_code) DO UPDATE SET category = EXCLUDED.category, canonical_question = EXCLUDED.canonical_question, answer_text = EXCLUDED.answer_text, paraphrases = EXCLUDED.paraphrases, conditions = EXCLUDED.conditions, effective_from = EXCLUDED.effective_from, effective_to = EXCLUDED.effective_to, version = EXCLUDED.version, source_title = EXCLUDED.source_title, source_section = EXCLUDED.source_section, owner = EXCLUDED.owner, approved = EXCLUDED.approved, sensitivity = EXCLUDED.sensitivity, synthetic = EXCLUDED.synthetic, updated_at = now() RETURNING policy_code) SELECT COUNT(*)::int AS upserted_count FROM upserted;",
-          "options": {
-            "queryReplacement": "={{ [ $json.records_json ] }}"
-          }
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          760,
-          0
-        ],
-        "id": "9e0dce2e-f1bb-4173-a953-2e8cc6f0412d",
-        "name": "Postgres Upsert",
-        "credentials": {
-          "postgres": {
-            "id": "postgresManagementAi01",
-            "name": "PostgreSQL Management AI"
-          }
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "id": "15600ec0-af47-4e14-95f7-40838d38b50b",
+      "name": "Validate Fields"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH payload AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(policy_code text, category text, canonical_question text, answer_text text, paraphrases jsonb, conditions jsonb, effective_from date, effective_to date, version integer, source_title text, source_section text, owner text, approved boolean, sensitivity text, synthetic boolean)), upserted AS (INSERT INTO hr.policy_item (policy_code, category, canonical_question, answer_text, paraphrases, conditions, effective_from, effective_to, version, source_title, source_section, owner, approved, sensitivity, synthetic) SELECT policy_code, category, canonical_question, answer_text, paraphrases, conditions, effective_from, effective_to, version, source_title, source_section, owner, approved, sensitivity, synthetic FROM payload ON CONFLICT (policy_code) DO UPDATE SET category = EXCLUDED.category, canonical_question = EXCLUDED.canonical_question, answer_text = EXCLUDED.answer_text, paraphrases = EXCLUDED.paraphrases, conditions = EXCLUDED.conditions, effective_from = EXCLUDED.effective_from, effective_to = EXCLUDED.effective_to, version = EXCLUDED.version, source_title = EXCLUDED.source_title, source_section = EXCLUDED.source_section, owner = EXCLUDED.owner, approved = EXCLUDED.approved, sensitivity = EXCLUDED.sensitivity, synthetic = EXCLUDED.synthetic, updated_at = now() RETURNING policy_code) SELECT COUNT(*)::int AS upserted_count FROM upserted;",
+        "options": {
+          "queryReplacement": "={{ [ $json.records_json ] }}"
         }
       },
-      {
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "WITH scoped AS (SELECT * FROM hr.policy_item WHERE source_title = 'Sentetik İK Politikası' AND policy_code BETWEEN 'HR-001' AND 'HR-100'), category_counts AS (SELECT category, COUNT(*)::int AS total FROM scoped GROUP BY category) SELECT COUNT(*)::int AS total_records, COUNT(DISTINCT policy_code)::int AS unique_policy_codes, COUNT(DISTINCT category)::int AS category_count, BOOL_AND(synthetic) AS all_synthetic, BOOL_AND(approved) AS all_approved, MIN(jsonb_array_length(paraphrases))::int AS min_paraphrases, COALESCE((SELECT jsonb_object_agg(category, total ORDER BY category) FROM category_counts), '{}'::jsonb) AS category_counts, (COUNT(*) = 100 AND COUNT(DISTINCT policy_code) = 100 AND COUNT(DISTINCT category) >= 15 AND BOOL_AND(synthetic) AND BOOL_AND(approved) AND MIN(jsonb_array_length(paraphrases)) >= 3) AS success, current_timestamp AS tested_at FROM scoped;",
-          "options": {}
-        },
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.7,
-        "position": [
-          1020,
-          0
-        ],
-        "id": "a3dc55be-156c-41a6-b393-d061c68d326d",
-        "name": "Count Check",
-        "credentials": {
-          "postgres": {
-            "id": "postgresManagementAi01",
-            "name": "PostgreSQL Management AI"
-          }
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        760,
+        0
+      ],
+      "id": "9e0dce2e-f1bb-4173-a953-2e8cc6f0412d",
+      "name": "Postgres Upsert",
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
         }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH scoped AS (SELECT * FROM hr.policy_item WHERE source_title = 'Sentetik İK Politikası' AND policy_code BETWEEN 'HR-001' AND 'HR-100'), category_counts AS (SELECT category, COUNT(*)::int AS total FROM scoped GROUP BY category) SELECT COUNT(*)::int AS total_records, COUNT(DISTINCT policy_code)::int AS unique_policy_codes, COUNT(DISTINCT category)::int AS category_count, BOOL_AND(synthetic) AS all_synthetic, BOOL_AND(approved) AS all_approved, MIN(jsonb_array_length(paraphrases))::int AS min_paraphrases, COALESCE((SELECT jsonb_object_agg(category, total ORDER BY category) FROM category_counts), '{}'::jsonb) AS category_counts, (COUNT(*) = 100 AND COUNT(DISTINCT policy_code) = 100 AND COUNT(DISTINCT category) >= 15 AND BOOL_AND(synthetic) AND BOOL_AND(approved) AND MIN(jsonb_array_length(paraphrases)) >= 3) AS success, current_timestamp AS tested_at FROM scoped;",
+        "options": {}
       },
-      {
-        "parameters": {
-          "mode": "manual",
-          "fields": {
-            "values": [
-              {
-                "name": "status",
-                "type": "stringValue",
-                "stringValue": "={{ $json.success ? 'SUCCESS' : 'FAILED' }}"
-              },
-              {
-                "name": "total_records",
-                "type": "numberValue",
-                "numberValue": "={{ $json.total_records }}"
-              },
-              {
-                "name": "unique_policy_codes",
-                "type": "numberValue",
-                "numberValue": "={{ $json.unique_policy_codes }}"
-              },
-              {
-                "name": "category_count",
-                "type": "numberValue",
-                "numberValue": "={{ $json.category_count }}"
-              },
-              {
-                "name": "all_synthetic",
-                "type": "booleanValue",
-                "booleanValue": "={{ $json.all_synthetic }}"
-              },
-              {
-                "name": "all_approved",
-                "type": "booleanValue",
-                "booleanValue": "={{ $json.all_approved }}"
-              },
-              {
-                "name": "min_paraphrases",
-                "type": "numberValue",
-                "numberValue": "={{ $json.min_paraphrases }}"
-              },
-              {
-                "name": "category_counts",
-                "type": "objectValue",
-                "objectValue": "={{ $json.category_counts }}"
-              },
-              {
-                "name": "tested_at",
-                "type": "stringValue",
-                "stringValue": "={{ $now.toISO() }}"
-              }
-            ]
-          },
-          "include": "none",
-          "options": {}
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1020,
+        0
+      ],
+      "id": "a3dc55be-156c-41a6-b393-d061c68d326d",
+      "name": "Count Check",
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "type": "stringValue",
+              "stringValue": "={{ $json.success ? 'SUCCESS' : 'FAILED' }}"
+            },
+            {
+              "name": "total_records",
+              "type": "numberValue",
+              "numberValue": "={{ $json.total_records }}"
+            },
+            {
+              "name": "unique_policy_codes",
+              "type": "numberValue",
+              "numberValue": "={{ $json.unique_policy_codes }}"
+            },
+            {
+              "name": "category_count",
+              "type": "numberValue",
+              "numberValue": "={{ $json.category_count }}"
+            },
+            {
+              "name": "all_synthetic",
+              "type": "booleanValue",
+              "booleanValue": "={{ $json.all_synthetic }}"
+            },
+            {
+              "name": "all_approved",
+              "type": "booleanValue",
+              "booleanValue": "={{ $json.all_approved }}"
+            },
+            {
+              "name": "min_paraphrases",
+              "type": "numberValue",
+              "numberValue": "={{ $json.min_paraphrases }}"
+            },
+            {
+              "name": "category_counts",
+              "type": "objectValue",
+              "objectValue": "={{ $json.category_counts }}"
+            },
+            {
+              "name": "tested_at",
+              "type": "stringValue",
+              "stringValue": "={{ $now.toISO() }}"
+            }
+          ]
         },
-        "type": "n8n-nodes-base.set",
-        "typeVersion": 3.2,
-        "position": [
-          1280,
-          0
-        ],
-        "id": "8fbd55be-d095-4a20-88e0-d290fc5bd4e5",
-        "name": "Result"
-      }
-    ],
-    "connections": {
-      "Manual Trigger": {
-        "main": [
-          [
-            {
-              "node": "Read/Load Dataset",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
+        "include": "none",
+        "options": {}
       },
-      "Read/Load Dataset": {
-        "main": [
-          [
-            {
-              "node": "Validate Fields",
-              "type": "main",
-              "index": 0
-            }
-          ]
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        1280,
+        0
+      ],
+      "id": "8fbd55be-d095-4a20-88e0-d290fc5bd4e5",
+      "name": "Result"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read/Load Dataset",
+            "type": "main",
+            "index": 0
+          }
         ]
-      },
-      "Validate Fields": {
-        "main": [
-          [
-            {
-              "node": "Postgres Upsert",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Postgres Upsert": {
-        "main": [
-          [
-            {
-              "node": "Count Check",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Count Check": {
-        "main": [
-          [
-            {
-              "node": "Result",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      }
+      ]
     },
-    "settings": {
-      "executionOrder": "v1"
+    "Read/Load Dataset": {
+      "main": [
+        [
+          {
+            "node": "Validate Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "staticData": null,
-    "meta": {},
-    "nodeGroups": [],
-    "pinData": {},
-    "tags": []
+    "Validate Fields": {
+      "main": [
+        [
+          {
+            "node": "Postgres Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Upsert": {
+      "main": [
+        [
+          {
+            "node": "Count Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Check": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "e36a50f8-2cb2-471c-b10a-72e9362a4379",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.750Z",
+      "createdAt": "2026-09-01T13:08:23.750Z",
+      "role": "workflow:owner",
+      "workflowId": "hrDatasetLoad03",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
   }
-]
+}

@@ -1,52 +1,434 @@
 {
+  "updatedAt": "2026-09-01T13:08:23.777Z",
+  "createdAt": "2026-09-01T13:08:23.777Z",
+  "id": "a4o1zq8xsRaRQv7b",
   "name": "10C_Common_Mail_Ingestion",
+  "description": null,
+  "active": true,
+  "isArchived": false,
   "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "common-mail-ingestion",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger-10c",
+      "name": "Webhook Ingest Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        100,
+        150
+      ],
+      "webhookId": "common-mail-ingestion"
+    },
     {
       "parameters": {},
       "id": "trigger-subworkflow",
-      "name": "Execute Workflow Trigger",
+      "name": "Execute Sub-workflow Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1,
-      "position": [200, 300]
+      "position": [
+        200,
+        300
+      ]
     },
     {
       "parameters": {
-        "command": "node -e \"\nconst { ingestCommonMail } = require('./tools/mail_ingestion_engine');\nconst inputMsg = JSON.parse(process.env.RAW_MESSAGE || '{}');\ningestCommonMail(inputMsg).then(res => {\n  console.log(JSON.stringify(res));\n}).catch(err => {\n  console.error(err);\n  process.exit(1);\n});\n\""
+        "jsCode": "const item = $input.first().json;\n\n// 1. Validate Required Fields\nif (!item.provider || !item.mailbox_address || !item.provider_message_id) {\n  return [{\n    json: {\n      error: 'Missing required mail metadata',\n      decision: 'REJECTED_INVALID_SCHEMA',\n      reason: 'Eksik veya geçersiz e-posta başlık bilgisi',\n      is_business_related: false,\n      item\n    }\n  }];\n}\n\nconst rawBody = item.plain_text_body || item.body_text || item.body || '';\nconst rawHtml = item.html_body || item.body_html || '';\nconst subject = item.subject || '(Konusuz Mesaj)';\nconst fromAddr = item.from_address || item.from || '';\n\n// 2. Clean Text: strip HTML, signatures, quoted threads\nlet cleanText = rawBody;\nif (!cleanText && rawHtml) {\n  cleanText = rawHtml.replace(/<[^>]*>/g, ' ');\n}\n\n// Normalize whitespace\ncleanText = cleanText.replace(/\\r\\n/g, '\\n').trim();\n\n// Strip common email signatures\nconst sigSplit = cleanText.split(/\\n--\\s*\\n|\\nSaygılarımla|\\nİyi çalışmalar|\\nBest regards|\\nSent from my/i);\ncleanText = sigSplit[0].trim();\n\n// Strip quoted reply/forward headers\nconst quoteSplit = cleanText.split(/\\nOn .* wrote:|\\nKimden: .*\\nTarih:/i);\ncleanText = quoteSplit[0].trim();\n\n// Calculate Content Hash\nconst crypto = require('crypto');\nconst contentHash = crypto.createHash('sha256').update(subject + '::' + cleanText).digest('hex');\n\n// 3. Prompt Injection Detection\nconst qLower = (subject + ' ' + cleanText).toLowerCase();\nconst injectionPatterns = [\n  'ignore previous instructions',\n  'önceki talimatları unut',\n  'sistem promptunu göster',\n  'drop table',\n  'bütün çalışan verilerini döndür',\n  'credential bilgilerini göster'\n];\nconst isInjection = injectionPatterns.some(p => qLower.includes(p));\n\n// 4. Business Relevance Classification\nconst adPatterns = ['kampanya', 'indirim kuponu', 'fırsat', 'bülten', 'newsletter', 'abone ol', 'unsub', 'unsubscribe', 'black friday'];\nconst isAd = adPatterns.some(p => qLower.includes(p));\n\nconst businessKeywords = ['proje', 'sprint', 'temsa', 'vortex', 'eldor', 'bms', 'ecu', 'test', 'hata', 'bug', 'risk', 'blokaj', 'karar', 'teslim', 'revizyon', 'donanım', 'yazılım'];\nconst isBusiness = businessKeywords.some(p => qLower.includes(p));\n\nlet decision = 'ACCEPTED_BUSINESS';\nlet reason = 'Geçerli iş e-postası';\nlet classification = 'BUSINESS_UPDATE';\nlet confidence = 0.95;\n\nif (isInjection) {\n  decision = 'REJECTED_SECURITY';\n  reason = 'Prompt injection şüphesi';\n  classification = 'SECURITY_REJECTED';\n  confidence = 1.0;\n} else if (isAd) {\n  decision = 'REJECTED_ADVERTISEMENT';\n  reason = 'Reklam veya pazarlama e-postası';\n  classification = 'MARKETING_AD';\n  confidence = 0.98;\n} else if (!isBusiness) {\n  decision = 'MANUAL_REVIEW';\n  reason = 'İşle ilgisi net anlaşılamayan e-posta';\n  classification = 'UNCERTAIN';\n  confidence = 0.60;\n}\n\n// 5. Project Metadata Extraction\nlet projectCode = 'PRJ-GENERAL';\nlet projectName = 'Genel Şirket İçi';\nif (qLower.includes('temsa')) {\n  projectCode = 'PRJ-TEMSA';\n  projectName = 'TEMSA Elektrikli Otobüs Projesi';\n} else if (qLower.includes('vortex')) {\n  projectCode = 'PRJ-VORTEX';\n  projectName = 'Vortex AI Engine Platformu';\n} else if (qLower.includes('eldor') || qLower.includes('obc')) {\n  projectCode = 'PRJ-ELDOR-OBC';\n  projectName = 'Eldor On-Board Charger Güç Elektroniği';\n} else if (qLower.includes('akıllı fabrika') || qLower.includes('kestirimci')) {\n  projectCode = 'PRJ-SMART-FACTORY';\n  projectName = 'Akıllı Fabrika Kestirimci Bakım';\n} else if (qLower.includes('autosar')) {\n  projectCode = 'PRJ-AUTOSAR-ECU';\n  projectName = 'Adaptive AUTOSAR ECU Entegrasyonu';\n}\n\nreturn [{\n  json: {\n    provider: item.provider,\n    mailbox_address: item.mailbox_address,\n    provider_message_id: item.provider_message_id,\n    provider_thread_id: item.provider_thread_id || null,\n    internet_message_id: item.internet_message_id || null,\n    from_address: fromAddr,\n    to_addresses: item.to_addresses || [],\n    subject: subject,\n    received_at: item.received_at || new Date().toISOString(),\n    clean_text: cleanText,\n    content_hash: contentHash,\n    decision: decision,\n    reason: reason,\n    classification: classification,\n    classification_confidence: confidence,\n    project_code: projectCode,\n    project_name: projectName,\n    is_business_related: decision === 'ACCEPTED_BUSINESS',\n    requires_manual_review: decision === 'MANUAL_REVIEW'\n  }\n}];"
       },
-      "id": "execute-mail-ingestion-pipeline",
-      "name": "Execute 25-Step Mail Ingestion Pipeline",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [450, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "const rawStdout = $input.first().json.stdout || '{}';\nlet result = {};\ntry {\n  result = JSON.parse(rawStdout);\n} catch (e) {\n  result = { decision: 'PROCESSING_ERROR', error: e.message };\n}\n\nreturn [{ json: result }];"
-      },
-      "id": "parse-ingestion-result",
-      "name": "Parse Ingestion Result",
+      "id": "validate-and-normalize-schema",
+      "name": "Validate & Normalize Message Schema",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [700, 300]
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, provider, decision FROM mail.ingestion_event WHERE (provider = $1 AND mailbox_address = $2 AND provider_message_id = $3) OR (content_hash = $4) LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [ $json.provider, $json.mailbox_address, $json.provider_message_id, $json.content_hash ] }}"
+        }
+      },
+      "id": "postgres-dedup-check",
+      "name": "Check Existing Event in Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = $('Validate & Normalize Message Schema').first().json;\nconst existing = $input.first()?.json || {};\n\nif (existing.id) {\n  original.decision = 'DUPLICATE';\n  original.reason = 'Tekrarlanan e-posta (Duplicate Message)';\n  original.is_business_related = false;\n}\n\nreturn [{ json: original }];"
+      },
+      "id": "apply-dedup-decision",
+      "name": "Apply Deduplication Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "ACCEPTED_BUSINESS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "DUPLICATE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "MANUAL_REVIEW",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "switch-decision",
+      "name": "Switch Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO rag.document (\n  id, source_type, external_id, title, content_preview,\n  project_code, project_name, from_address, received_at,\n  metadata, created_at, updated_at\n) VALUES (\n  gen_random_uuid(), 'EMAIL', $1, $2, $3, $4, $5, $6, $7::timestamptz,\n  $8::jsonb, now(), now()\n)\nON CONFLICT (source_type, external_id) DO UPDATE SET\n  title = EXCLUDED.title,\n  content_preview = EXCLUDED.content_preview,\n  updated_at = now()\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [ $json.provider_message_id, $json.subject, $json.clean_text.substring(0, 300), $json.project_code, $json.project_name, $json.from_address, $json.received_at, JSON.stringify({ provider: $json.provider, content_hash: $json.content_hash }) ] }}"
+        }
+      },
+      "id": "upsert-rag-document",
+      "name": "Upsert RAG Document",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1480,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3-embedding:0.6b\",\n  \"prompt\": {{ JSON.stringify($('Apply Deduplication Decision').first().json.subject + ' ' + $('Apply Deduplication Decision').first().json.clean_text) }}\n}",
+        "options": {}
+      },
+      "id": "generate-embedding",
+      "name": "Generate Ollama Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1720,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO rag.chunk (\n  id, document_id, chunk_index, content,\n  metadata, embedding, created_at\n) VALUES (\n  gen_random_uuid(), $1::uuid, 0, $2,\n  $3::jsonb, $4::vector, now()\n)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Upsert RAG Document').first().json.id,\n  $('Apply Deduplication Decision').first().json.clean_text,\n  JSON.stringify({\n    project_code: $('Apply Deduplication Decision').first().json.project_code,\n    subject: $('Apply Deduplication Decision').first().json.subject,\n    provider: $('Apply Deduplication Decision').first().json.provider,\n    received_at: $('Apply Deduplication Decision').first().json.received_at\n  }),\n  '[' + $json.embedding.join(',') + ']'\n] }}"
+        }
+      },
+      "id": "upsert-rag-chunk",
+      "name": "Upsert RAG Chunk",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1960,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mail.ingestion_event (\n  event_id, provider, mailbox_address, provider_message_id,\n  internet_message_id, from_address, subject, received_at,\n  content_hash, decision, reason, classification,\n  classification_confidence, project_code, is_business_related,\n  requires_manual_review, created_at\n) VALUES (\n  gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7::timestamptz,\n  $8, $9, $10, $11, $12::numeric, $13, $14::boolean, $15::boolean, now()\n)\nON CONFLICT (provider, mailbox_address, provider_message_id) DO NOTHING\nRETURNING event_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Apply Deduplication Decision').first().json.provider,\n  $('Apply Deduplication Decision').first().json.mailbox_address,\n  $('Apply Deduplication Decision').first().json.provider_message_id,\n  $('Apply Deduplication Decision').first().json.internet_message_id,\n  $('Apply Deduplication Decision').first().json.from_address,\n  $('Apply Deduplication Decision').first().json.subject,\n  $('Apply Deduplication Decision').first().json.received_at,\n  $('Apply Deduplication Decision').first().json.content_hash,\n  $('Apply Deduplication Decision').first().json.decision,\n  $('Apply Deduplication Decision').first().json.reason,\n  $('Apply Deduplication Decision').first().json.classification,\n  $('Apply Deduplication Decision').first().json.classification_confidence,\n  $('Apply Deduplication Decision').first().json.project_code,\n  $('Apply Deduplication Decision').first().json.is_business_related,\n  $('Apply Deduplication Decision').first().json.requires_manual_review\n] }}"
+        }
+      },
+      "id": "audit-ingestion-event",
+      "name": "Audit Ingestion Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2200,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "type": "stringValue",
+              "stringValue": "SUCCESS"
+            },
+            {
+              "name": "decision",
+              "type": "stringValue",
+              "stringValue": "={{ $('Apply Deduplication Decision').first().json.decision }}"
+            },
+            {
+              "name": "reason",
+              "type": "stringValue",
+              "stringValue": "={{ $('Apply Deduplication Decision').first().json.reason }}"
+            },
+            {
+              "name": "project_code",
+              "type": "stringValue",
+              "stringValue": "={{ $('Apply Deduplication Decision').first().json.project_code }}"
+            },
+            {
+              "name": "is_business_related",
+              "type": "booleanValue",
+              "booleanValue": "={{ $('Apply Deduplication Decision').first().json.is_business_related }}"
+            },
+            {
+              "name": "content_hash",
+              "type": "stringValue",
+              "stringValue": "={{ $('Apply Deduplication Decision').first().json.content_hash }}"
+            }
+          ]
+        },
+        "include": "none",
+        "options": {}
+      },
+      "id": "format-ingestion-result",
+      "name": "Format Ingestion Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        2450,
+        300
+      ]
     }
   ],
   "connections": {
-    "Execute Workflow Trigger": {
+    "Execute Sub-workflow Trigger": {
       "main": [
         [
           {
-            "node": "Execute 25-Step Mail Ingestion Pipeline",
+            "node": "Validate & Normalize Message Schema",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Execute 25-Step Mail Ingestion Pipeline": {
+    "Validate & Normalize Message Schema": {
       "main": [
         [
           {
-            "node": "Parse Ingestion Result",
+            "node": "Check Existing Event in Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Event in Postgres": {
+      "main": [
+        [
+          {
+            "node": "Apply Deduplication Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Deduplication Decision": {
+      "main": [
+        [
+          {
+            "node": "Switch Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Decision": {
+      "main": [
+        [
+          {
+            "node": "Upsert RAG Document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Ingestion Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Ingestion Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Ingestion Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert RAG Document": {
+      "main": [
+        [
+          {
+            "node": "Generate Ollama Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Ollama Embedding": {
+      "main": [
+        [
+          {
+            "node": "Upsert RAG Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert RAG Chunk": {
+      "main": [
+        [
+          {
+            "node": "Audit Ingestion Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Ingestion Event": {
+      "main": [
+        [
+          {
+            "node": "Format Ingestion Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Ingest Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize Message Schema",
             "type": "main",
             "index": 0
           }
@@ -56,5 +438,39 @@
   },
   "settings": {
     "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "fe24e38d-54b0-4ca1-b15c-ceff3ff24992",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.777Z",
+      "createdAt": "2026-09-01T13:08:23.777Z",
+      "role": "workflow:owner",
+      "workflowId": "a4o1zq8xsRaRQv7b",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
   }
 }

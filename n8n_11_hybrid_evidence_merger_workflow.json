@@ -1,0 +1,226 @@
+{
+  "updatedAt": "2026-09-01T13:08:23.781Z",
+  "createdAt": "2026-09-01T13:08:23.781Z",
+  "id": "uSevqGz9uojM7OM7",
+  "name": "11_Hybrid_Evidence_Merger",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-subworkflow",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst question = item.question || item.query || item.prompt || '';\n\nreturn [{\n  json: {\n    question: question,\n    needs_attendance: true,\n    needs_mail: true\n  }\n}];"
+      },
+      "id": "prepare-hybrid-queries",
+      "name": "Prepare Multi-Source Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT employee_no, full_name, department, status, first_in, late_minutes FROM attendance.daily_summary WHERE day = '2026-01-02' AND (status = 'LATE' OR status = 'REMOTE' OR late_minutes > 0) LIMIT 10;",
+        "options": {}
+      },
+      "id": "fetch-attendance-evidence",
+      "name": "Fetch Attendance Evidence",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        700,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT d.title AS subject, d.sender_address AS from_address, d.project_code, c.content FROM rag.chunk c JOIN rag.document d ON c.document_id = d.id WHERE d.source_type = 'EMAIL' ORDER BY c.created_at DESC LIMIT 5;",
+        "options": {}
+      },
+      "id": "fetch-mail-evidence",
+      "name": "Fetch Project Mail Evidence",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        700,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresManagementAi01",
+          "name": "PostgreSQL Management AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const qItem = $('Prepare Multi-Source Queries').first().json;\nconst attItems = $('Fetch Attendance Evidence').all();\nconst mailItems = $('Fetch Project Mail Evidence').all();\n\nlet attText = '';\nattItems.forEach(i => {\n  const r = i.json;\n  attText += `- ${r.full_name} (${r.department}): ${r.status}, Giriş: ${r.first_in || 'Yok'}, Gecikme: ${r.late_minutes || 0} dk\\n`;\n});\nif (!attText) attText = 'Bugün için özel bir gecikme kaydı bulunamadı.';\n\nlet mailText = '';\nmailItems.forEach(i => {\n  const r = i.json;\n  mailText += `- [${r.project_code || 'GENEL'}] ${r.subject} (${r.from_address}): ${r.content}\\n`;\n});\nif (!mailText) mailText = 'İlgili güncel proje e-postası bulunamadı.';\n\nconst prompt = `Sen Eldor/NISO AI kurumsal yönetim asistanısın. Aşağıdaki çoklu kaynak verilerini (Puantaj/Vardiya durumu ve Proje E-Postaları) analiz ederek yöneticinin sorusuna kapsamlı ve net bir Türkçe özet hazırla.\\n\\nÇOK ÖNEMLİ KURAL (NEDENSELLİK ŞARTI):\\n1. Puantaj verisi ile proje aksamaları/riskleri arasındaki korelasyon veya zamansal çakışma, doğrudan bir sebep-sonuç ilişkisini KANITLAMAZ.\\n2. Raporunda verileri mutlaka ayrı bölümlerde sun ve cevabın sonuna şu resmi notu ekle: '(Not: Puantaj/katılım durumu ile proje aksaklıkları arasındaki zamansal çakışmalar korelasyon niteliğindedir; doğrudan nedensellik kanıtı sayılmaz.)'\\n\\n1. BÖLÜM: PERSONEL & KATILIM DURUMU\\n${attText}\\n\\n2. BÖLÜM: PROJE DURUMU & E-POSTA AKIŞI\\n${mailText}\\n\\nYÖNETİCİ SORUSU: ${qItem.question}\\n\\nCEVAP:`;\n\nreturn [{\n  json: {\n    question: qItem.question,\n    prompt: prompt\n  }\n}];"
+      },
+      "id": "synthesize-hybrid-context",
+      "name": "Synthesize Hybrid Evidence Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3.5:9b\",\n  \"prompt\": {{ JSON.stringify($json.prompt) }},\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.1,\n    \"top_p\": 0.9\n  }\n}",
+        "options": {}
+      },
+      "id": "generate-hybrid-answer",
+      "name": "Qwen3.5-9B Hybrid Answer Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const llmRes = $input.first()?.json || {};\nlet answer = (llmRes.response || '').trim();\nif (!answer && llmRes.thinking) {\n  const match = llmRes.thinking.match(/(\\n\\*\\*[A-ZÇĞİÖŞÜ][\\s\\S]+)/i) || llmRes.thinking.match(/(\\n#[\\s\\S]+)/i);\n  if (match) answer = match[0].trim();\n}\nif (!answer) {\n  answer = 'İlgili devam verileri ve proje e-postaları birleştirilerek incelenmiştir.';\n}\n\nif (!answer.includes('nedensellik')) {\n  answer += '\\n\\n*(Not: Puantaj/katılım durumu ile proje aksaklıkları arasındaki zamansal çakışmalar korelasyon niteliğindedir; doğrudan nedensellik kanıtı sayılmaz.)*';\n}\n\nreturn [{\n  json: {\n    status: 'SUCCESS',\n    intent: 'HYBRID',\n    title: 'Hibrit Analiz',\n    answer: answer,\n    route_used: 'HYBRID',\n    causality_disclaimer: true,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "format-hybrid-output",
+      "name": "Format Hybrid Output & Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1450,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Multi-Source Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Multi-Source Queries": {
+      "main": [
+        [
+          {
+            "node": "Fetch Attendance Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Attendance Evidence": {
+      "main": [
+        [
+          {
+            "node": "Fetch Project Mail Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Project Mail Evidence": {
+      "main": [
+        [
+          {
+            "node": "Synthesize Hybrid Evidence Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synthesize Hybrid Evidence Prompt": {
+      "main": [
+        [
+          {
+            "node": "Qwen3.5-9B Hybrid Answer Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen3.5-9B Hybrid Answer Generator": {
+      "main": [
+        [
+          {
+            "node": "Format Hybrid Output & Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "815a1e01-b48a-4d58-b00c-83e33a23da13",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-09-01T13:08:23.783Z",
+      "createdAt": "2026-09-01T13:08:23.783Z",
+      "role": "workflow:owner",
+      "workflowId": "uSevqGz9uojM7OM7",
+      "projectId": "DGu4CJhdcNhB2Rjx",
+      "project": {
+        "updatedAt": "2026-08-31T13:38:50.487Z",
+        "createdAt": "2026-08-31T13:37:08.257Z",
+        "id": "DGu4CJhdcNhB2Rjx",
+        "name": "Emre Gündoğdu <emre.gundogdu016@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "b471573d-5395-4f2b-a018-27ba1d32879a"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}
