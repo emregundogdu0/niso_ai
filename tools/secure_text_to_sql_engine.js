@@ -1,6 +1,6 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
-const { parseTurkishDateRange } = require('./date_normalizer');
+const { parseMultilingualDateRange } = require('./date_normalizer');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const LLM_MODEL = 'qwen3.5:9b';
@@ -38,8 +38,8 @@ function runAdminPsql(sqlQuery) {
   });
 }
 
-function normalizeDateAndEntities(question) {
-  const dateInfo = parseTurkishDateRange(question);
+function normalizeDateAndEntities(question, lang = 'tr') {
+  const dateInfo = parseMultilingualDateRange(question, lang);
   return {
     normalizedDate: dateInfo.sqlClause,
     dateFrom: dateInfo.dateFrom,
@@ -56,251 +56,194 @@ function resolveFastDeterministicSql(question, dateContext) {
   const q = question.toLowerCase();
   const dateClause = dateContext.sqlClause || `day = '2026-09-02'`;
 
-  // 1. En çok geç kalanlar / en fazla geciken çalışanlar
-  if (q.includes('en çok geç kalan') || q.includes('en fazla geciken') || (q.includes('en çok') && q.includes('geciken'))) {
+  // 1. Most late employees
+  if (q.includes('en cok gec kalan') || q.includes('en fazla geciken') || q.includes('most late') || q.includes('piu in ritardo')) {
     return `SELECT employee_no, full_name, department, SUM(late_minutes) AS total_late_minutes, COUNT(*) AS late_days_count FROM attendance.daily_summary WHERE ${dateClause} AND status = 'LATE' GROUP BY employee_no, full_name, department ORDER BY total_late_minutes DESC LIMIT 10;`;
   }
 
-  // 2. En çok fiili çalışanlar
-  if (q.includes('en çok') && (q.includes('fiili') || q.includes('çalışan')) && (q.includes('5') || q.includes('beş') || q.includes('kişi'))) {
-    return `SELECT employee_no, full_name, department, SUM(worked_minutes) AS total_worked_minutes FROM attendance.daily_summary WHERE ${dateClause} GROUP BY employee_no, full_name, department ORDER BY total_worked_minutes DESC LIMIT 5;`;
-  }
-
-  // 3. Toplam gecikme süresi (örn: Son 7 gündeki toplam gecikme süresi nedir?)
-  if (q.includes('toplam gecikme') || (q.includes('gecikme süresi') && q.includes('toplam'))) {
-    return `SELECT SUM(late_minutes) AS total_late_minutes, COUNT(CASE WHEN status = 'LATE' THEN 1 END) AS late_occurrences FROM attendance.daily_summary WHERE ${dateClause};`;
-  }
-
-  // 4. Zamanında gelenlerin sayısı (örn: 02.09.2026 tarihinde kaç kişi zamanında geldi?)
-  if (q.includes('zamanında') && (q.includes('sayısı') || q.includes('kaç'))) {
+  // 2. On-time employees count
+  if ((q.includes('zamaninda') || q.includes('on time') || q.includes('puntual')) && (q.includes('kac') || q.includes('how many') || q.includes('quante') || q.includes('count') || q.includes('numero'))) {
     return `SELECT COUNT(*) AS on_time_count FROM attendance.daily_summary WHERE ${dateClause} AND status = 'ON_TIME';`;
   }
 
-  // 5. Departmanlara göre ortalama gecikme süresi
-  if (q.includes('departman') && (q.includes('ortalama') || q.includes('gecikme'))) {
-    return `SELECT department, ROUND(AVG(late_minutes), 1) AS avg_late_minutes, COUNT(CASE WHEN status = 'LATE' THEN 1 END) AS late_count FROM attendance.daily_summary WHERE ${dateClause} GROUP BY department ORDER BY avg_late_minutes DESC;`;
-  }
-
-  // 6. Departmanlara göre toplam çalışan sayısı
-  if (q.includes('departman') && q.includes('toplam çalışan')) {
-    return `SELECT department, COUNT(DISTINCT employee_no) AS total_employees FROM attendance.daily_summary GROUP BY department ORDER BY total_employees DESC;`;
-  }
-
-  // 7. Vardiyalara göre çalışan dağılımı
-  if (q.includes('vardiya') && (q.includes('dağılım') || q.includes('çalışan'))) {
-    return `SELECT shift_name, COUNT(DISTINCT employee_no) AS employee_count FROM attendance.daily_summary GROUP BY shift_name ORDER BY employee_count DESC;`;
-  }
-
-  // 8. İzinli olan çalışanlar
-  if (q.includes('izinli olan') || (q.includes('izin') && q.includes('kimler'))) {
-    return `SELECT employee_no, full_name, department, exception_types, day FROM attendance.daily_summary WHERE ${dateClause} AND status = 'ON_LEAVE' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 9. Uzaktan çalışanlar
-  if (q.includes('uzaktan çalışan') || q.includes('remote')) {
-    return `SELECT employee_no, full_name, department, day FROM attendance.daily_summary WHERE ${dateClause} AND status = 'REMOTE' ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 10. Eksik çıkış basanlar
-  if (q.includes('eksik çıkış') || q.includes('çıkış turnikesine basmayan')) {
-    return `SELECT employee_no, full_name, department, day, first_in FROM attendance.daily_summary WHERE ${dateClause} AND missing_checkout = true ORDER BY employee_no LIMIT 100;`;
-  }
-
-  // 11. Bugün / Dün / 1 Eylül / Belirli Tarihte kimler geç kaldı
-  if (q.includes('geç kaldı') || q.includes('gec kaldi') || (q.includes('geç kalan') && !q.includes('en çok'))) {
+  // 3. Late arrivals today / on date (TR, EN, IT)
+  if (
+    q.includes('gec kaldi') || q.includes('geciken') || q.includes('gec kalan') ||
+    q.includes('arrived late') || q.includes('is late') || q.includes('who is late') || q.includes('who arrived late') ||
+    q.includes('in ritardo') || q.includes('arrivato in ritardo') || q.includes('chi e in ritardo') || q.includes('chi e arrivato in ritardo')
+  ) {
     let deptFilter = '';
-    if (q.includes('yazılım')) deptFilter = " AND department = 'Yazılım'";
-    else if (q.includes('insan kaynakları')) deptFilter = " AND department = 'İnsan Kaynakları'";
-    else if (q.includes('finans')) deptFilter = " AND department = 'Finans'";
-    else if (q.includes('satış')) deptFilter = " AND department = 'Satış & Pazarlama'";
-    else if (q.includes('fabrika') || q.includes('üretim')) deptFilter = " AND department = 'Üretim & Fabrika'";
+    if (q.includes('yazilim') || q.includes('software')) deptFilter = " AND department = 'Yazılım'";
+    else if (q.includes('insan kaynaklari') || q.includes('hr') || q.includes('human resources')) deptFilter = " AND department = 'İnsan Kaynakları'";
+    else if (q.includes('finans') || q.includes('finance')) deptFilter = " AND department = 'Finans'";
+    else if (q.includes('satis') || q.includes('sales')) deptFilter = " AND department = 'Satış & Pazarlama'";
+    else if (q.includes('fabrika') || q.includes('uretim') || q.includes('factory') || q.includes('production')) deptFilter = " AND department = 'Üretim & Fabrika'";
 
     return `SELECT employee_no, full_name, department, shift_name, late_minutes FROM attendance.daily_summary WHERE ${dateClause} AND status = 'LATE'${deptFilter} ORDER BY late_minutes DESC LIMIT 100;`;
   }
 
-  // 12. Fabrikada mesaide olanlar
-  if (q.includes('fabrika') && (q.includes('mesaide') || q.includes('kimler'))) {
-    return `SELECT employee_no, full_name, department, shift_name, first_in, last_out FROM attendance.daily_summary WHERE ${dateClause} AND department = 'Üretim & Fabrika' AND first_in IS NOT NULL ORDER BY employee_no LIMIT 100;`;
+  // 4. Employees on leave
+  if (q.includes('izinli') || q.includes('on leave') || q.includes('in ferie') || q.includes('in permesso')) {
+    return `SELECT employee_no, full_name, department, exception_types, day FROM attendance.daily_summary WHERE ${dateClause} AND status = 'ON_LEAVE' ORDER BY employee_no LIMIT 100;`;
   }
 
-  return null;
+  // 5. Remote employees
+  if (q.includes('uzaktan') || q.includes('remote') || q.includes('da remoto') || q.includes('smart working')) {
+    return `SELECT employee_no, full_name, department, day FROM attendance.daily_summary WHERE ${dateClause} AND status = 'REMOTE' ORDER BY employee_no LIMIT 100;`;
+  }
+
+  // Default fallback: Late employees on date
+  return `SELECT employee_no, full_name, department, shift_name, late_minutes FROM attendance.daily_summary WHERE ${dateClause} AND status = 'LATE' ORDER BY late_minutes DESC LIMIT 100;`;
 }
 
-// SQL Safety Guard
-function inspectSqlSafety(rawSql) {
-  const sql = (rawSql || '').trim();
-  const forbidden = /\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|COPY|CALL|GRANT|REVOKE|VACUUM|EXECUTE|PREPARE|DO)\b/i;
-
-  if (!/^(\s*WITH\s+[\s\S]+?\s+)?SELECT\s+/i.test(sql)) {
-    return { isSafe: false, reason: 'Sorgu sadece SELECT ile başlamalıdır.' };
-  }
-  if (forbidden.test(sql)) {
-    return { isSafe: false, reason: 'Yasaklı DDL/DML anahtar kelimesi tespit edildi.' };
-  }
-  if (sql.replace(/;+\s*$/, '').includes(';')) {
-    return { isSafe: false, reason: 'Çoklu statement veya ardışık SQL komutu yasaktır.' };
-  }
-  if (sql.includes('--') || sql.includes('/*')) {
-    return { isSafe: false, reason: 'SQL yorum satırı yasaktır.' };
+// SQL Query Validator and Security Checker
+function validateSqlQuery(sql) {
+  if (!sql || typeof sql !== 'string') {
+    return { valid: false, reason: 'Empty or non-string SQL query' };
   }
 
-  let finalSql = sql;
-  if (!finalSql.toLowerCase().includes('limit') && !finalSql.toLowerCase().includes('count(') && !finalSql.toLowerCase().includes('sum(') && !finalSql.toLowerCase().includes('avg(')) {
-    finalSql = finalSql.replace(/;*$/, ' LIMIT 100;');
+  const clean = sql.trim().replace(/;+$/, '');
+  const forbiddenKeywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'COPY'];
+
+  for (const kw of forbiddenKeywords) {
+    const reg = new RegExp(`\\b${kw}\\b`, 'i');
+    if (reg.test(clean)) {
+      return { valid: false, reason: `Forbidden keyword detected: ${kw}` };
+    }
   }
 
-  return { isSafe: true, sanitizedSql: finalSql };
+  if (clean.includes('--') || clean.includes('/*') || clean.includes('*/')) {
+    return { valid: false, reason: 'SQL comments are not allowed' };
+  }
+
+  if (!clean.toUpperCase().startsWith('SELECT') && !clean.toUpperCase().startsWith('WITH')) {
+    return { valid: false, reason: 'Query must start with SELECT or WITH' };
+  }
+
+  return { valid: true, cleanSql: clean };
 }
 
-// Main Secure Text-to-SQL Execution Function
-async function executeSecureTextToSql(question, sessionId = 'session_default') {
+// Format SQL Rows into Multilingual Markdown Table
+function formatAttendanceResult(rows, dateDescription, lang = 'tr') {
+  if (!rows || rows.length === 0) {
+    const emptyMsgs = {
+      tr: `Belirtilen tarihte (${dateDescription}) kayıt bulunamadı veya kriterlere uyan çalışan yok.`,
+      en: `No records found matching your criteria for ${dateDescription}.`,
+      it: `Nessun record trovato corrispondente ai criteri per ${dateDescription}.`
+    };
+    return emptyMsgs[lang] || emptyMsgs.tr;
+  }
+
+  // Count aggregate queries
+  if (rows.length === 1 && (rows[0].on_time_count !== undefined || rows[0].total_employees !== undefined)) {
+    if (rows[0].on_time_count !== undefined) {
+      if (lang === 'en') return `**On-time Attendance:** A total of **${rows[0].on_time_count}** employees arrived on time (${dateDescription}).`;
+      if (lang === 'it') return `**Presenze Puntuali:** Un totale di **${rows[0].on_time_count}** dipendenti è arrivato puntuale (${dateDescription}).`;
+      return `**Zamanında Giriş Durumu:** ${dateDescription} tarihinde toplam **${rows[0].on_time_count}** çalışan zamanında mesaiye başlamıştır.`;
+    }
+  }
+
+  const summaries = {
+    tr: `**Sonuç Özeti (${dateDescription}):** Toplam **${rows.length}** kayıt listelendi.`,
+    en: `**Summary of Results (${dateDescription}):** Total **${rows.length}** records found.`,
+    it: `**Riepilogo dei Risultati (${dateDescription}):** Trovati **${rows.length}** record in totale.`
+  };
+
+  let md = `${summaries[lang] || summaries.tr}\n\n`;
+
+  // Headers
+  if (lang === 'en') {
+    md += `| Emp No | Full Name | Department | Shift / Status | Details |\n`;
+    md += `| :--- | :--- | :--- | :--- | :--- |\n`;
+  } else if (lang === 'it') {
+    md += `| Matr. | Nome e Cognome | Dipartimento | Turno / Stato | Dettagli |\n`;
+    md += `| :--- | :--- | :--- | :--- | :--- |\n`;
+  } else {
+    md += `| Sicil | Ad Soyad | Departman | Vardiya / Durum | Detay |\n`;
+    md += `| :--- | :--- | :--- | :--- | :--- |\n`;
+  }
+
+  for (const r of rows) {
+    const empNo = r.employee_no || '-';
+    const name = r.full_name || '-';
+    const dept = r.department || '-';
+    const shift = r.shift_name || r.status || '-';
+
+    let detail = '';
+    if (r.late_minutes !== undefined && r.late_minutes !== null) {
+      if (lang === 'en') detail = `${r.late_minutes} min late`;
+      else if (lang === 'it') detail = `${r.late_minutes} min ritardo`;
+      else detail = `${r.late_minutes} dk geç`;
+    } else if (r.total_late_minutes !== undefined) {
+      if (lang === 'en') detail = `Total: ${r.total_late_minutes} min (${r.late_days_count} days)`;
+      else if (lang === 'it') detail = `Totale: ${r.total_late_minutes} min (${r.late_days_count} giorni)`;
+      else detail = `Toplam: ${r.total_late_minutes} dk (${r.late_days_count} gün)`;
+    } else if (r.exception_types) {
+      detail = String(r.exception_types);
+    } else {
+      detail = '-';
+    }
+
+    md += `| \`${empNo}\` | **${name}** | ${dept} | ${shift} | ${detail} |\n`;
+  }
+
+  return md.trim();
+}
+
+async function executeSecureTextToSql(question, sessionId, lang = 'tr') {
   const startTime = Date.now();
-  const requestId = crypto.randomUUID();
+  const dateContext = normalizeDateAndEntities(question, lang);
 
-  // Step 1: Deterministic Date Parsing
-  const dateCtx = normalizeDateAndEntities(question);
+  const rawSql = resolveFastDeterministicSql(question, dateContext);
+  const validation = validateSqlQuery(rawSql);
 
-  if (dateCtx.requiresClarification) {
+  if (!validation.valid) {
+    const errMsgs = {
+      tr: 'Oluşturulan SQL sorgusu güvenlik kurallarını geçemedi.',
+      en: 'The generated SQL query did not pass security validation.',
+      it: 'La query SQL generata non ha superato la convalida di sicurezza.'
+    };
     return {
-      status: 'CLARIFICATION_NEEDED',
-      intent: 'ATTENDANCE_SQL',
-      title: 'Açıklama Gerekli',
-      answer: dateCtx.clarificationQuestion,
+      status: 'SECURITY_REJECTED',
+      answer: errMsgs[lang] || errMsgs.tr,
       sql: null,
       rows: [],
       latency_ms: Date.now() - startTime
     };
   }
 
-  // Step 2: Try Fast Deterministic SQL Generation
-  let targetSql = resolveFastDeterministicSql(question, dateCtx);
+  try {
+    const rows = runReadOnlyPsqlJson(validation.cleanSql);
+    const answerMarkdown = formatAttendanceResult(rows, dateContext.dateDescription, lang);
 
-  // Step 3: If no deterministic match, call LLM with strict parameters
-  if (!targetSql) {
-    const prompt = `Sen PostgreSQL 17 için uzman ve güvenli bir Text-to-SQL asistanısın.
-Görünüm: attendance.daily_summary
-Kolonlar: day, employee_no, full_name, department, shift_name, shift_start, shift_end, grace_minutes, first_in, last_out, worked_minutes, late_minutes, early_exit_minutes, missing_checkout, is_workday, is_holiday, has_approved_exception, exception_types, status ('ON_TIME', 'LATE', 'ON_LEAVE', 'REMOTE', 'ABSENT', 'HOLIDAY', 'WEEKEND', 'MISSING_CHECKOUT').
-
-KURALLAR:
-1. SADECE JSON formatında {"intent_summary": "...", "sql": "SELECT ... LIMIT 100;"} üret.
-2. Tarih filtresi olarak MUTLAKA "${dateCtx.sqlClause}" kullan. Asla başka tarih uydurma!
-
-KULLANICI SORUSU: "${question}"
-TARİH FİLTRESİ: ${dateCtx.sqlClause}
-JSON:`;
-
-    const res = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        prompt: prompt,
-        stream: false,
-        format: 'json',
-        keep_alive: '30m',
-        options: { temperature: 0.0, num_predict: 128 }
-      })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      try {
-        const parsed = JSON.parse(data.response || '{}');
-        targetSql = parsed.sql || null;
-      } catch (e) {}
-    }
-  }
-
-  if (!targetSql) {
-    targetSql = `SELECT employee_no, full_name, department, shift_name, late_minutes FROM attendance.daily_summary WHERE ${dateCtx.sqlClause} AND status = 'LATE' ORDER BY late_minutes DESC LIMIT 100;`;
-  }
-
-  // Step 4: SQL Guard Inspection
-  const guard = inspectSqlSafety(targetSql);
-  if (!guard.isSafe) {
     return {
-      status: 'GUARD_REJECTED',
-      intent: 'ATTENDANCE_SQL',
-      title: 'Güvenlik Uyarısı',
-      answer: `⚠️ **Güvenlik Uyarısı:** Bu sorgu SQL Güvenlik Kalkanı (SQL Guard) tarafından engellenmiştir.\n\n*Gerekçe: ${guard.reason}*`,
-      sql: targetSql,
-      rows: [],
+      status: 'SUCCESS',
+      answer: answerMarkdown,
+      sql: validation.cleanSql,
+      rows: rows,
+      date_context: dateContext,
       latency_ms: Date.now() - startTime
     };
-  }
-
-  // Step 5: Execute via Read-Only Role (chatbot_reader)
-  let rows = [];
-  try {
-    rows = runReadOnlyPsqlJson(guard.sanitizedSql);
   } catch (err) {
+    const sysErrMsgs = {
+      tr: 'Veritabanı sorgusu yürütülürken bir hata oluştu.',
+      en: 'An error occurred while executing the database query.',
+      it: "Si è verificato un errore durante l'esecuzione della query nel database."
+    };
     return {
       status: 'ERROR',
-      intent: 'ATTENDANCE_SQL',
-      title: 'Sorgu Hatası',
-      answer: `Veritabanı sorgusu yürütülürken hata oluştu: ${err.message}`,
-      sql: guard.sanitizedSql,
+      answer: sysErrMsgs[lang] || sysErrMsgs.tr,
+      sql: validation.cleanSql,
       rows: [],
       latency_ms: Date.now() - startTime
     };
   }
-
-  // Step 6: Build Summary Markdown
-  let summary = '';
-  if (rows.length === 0) {
-    summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nKriterlere uygun herhangi bir kayıt bulunamadı.\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
-  } else if (rows.length === 1 && (rows[0].on_time_count !== undefined || rows[0].total_late_minutes !== undefined || rows[0].max_late_minutes !== undefined)) {
-    const r = rows[0];
-    if (r.on_time_count !== undefined) {
-      summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nBelirtilen tarihte toplam **${r.on_time_count}** çalışan zamanında gelmiştir.\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
-    } else if (r.total_late_minutes !== undefined) {
-      summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nToplam gecikme süresi **${r.total_late_minutes || 0} dakika** (${r.late_occurrences || 0} vaka) olarak hesaplanmıştır.\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
-    } else {
-      summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\n${JSON.stringify(r)}\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
-    }
-  } else {
-    summary = `**Sonuç Özeti (${dateCtx.dateDescription}):**\nToplam **${rows.length}** kayıt listelendi.\n\n`;
-    summary += '| Sicil | Ad Soyad | Departman | Durum | Detay |\n| :--- | :--- | :--- | :---: | :--- |\n';
-    for (const r of rows.slice(0, 8)) {
-      const empNo = r.employee_no || '-';
-      const name = r.full_name || '-';
-      const dept = r.department || '-';
-      const status = r.status || (r.total_late_minutes ? 'LATE' : '-');
-      let detail = '';
-      if (r.late_minutes && r.late_minutes > 0) detail = `${r.late_minutes} dk geç`;
-      else if (r.total_late_minutes) detail = `Toplam ${r.total_late_minutes} dk (${r.late_days_count} gün)`;
-      else if (r.worked_minutes) detail = `${r.worked_minutes} dk çalışma`;
-      else if (r.exception_types) detail = r.exception_types;
-      else if (r.missing_checkout) detail = 'Çıkış basılmadı';
-      else detail = r.shift_name || '-';
-
-      summary += `| ${empNo} | ${name} | ${dept} | **${status}** | ${detail} |\n`;
-    }
-    if (rows.length > 8) {
-      summary += `\n*... ve ${rows.length - 8} kayıt daha.*`;
-    }
-    summary += `\n\n*(Yürütülen SQL: \`${guard.sanitizedSql}\`)*`;
-  }
-
-  const latencyMs = Date.now() - startTime;
-
-  return {
-    status: 'SUCCESS',
-    intent: 'ATTENDANCE_SQL',
-    title: 'Devam Bilgisi',
-    answer: summary,
-    sql: guard.sanitizedSql,
-    rows: rows,
-    normalized_date: dateCtx.sqlClause,
-    date_description: dateCtx.dateDescription,
-    latency_ms: latencyMs
-  };
 }
 
 module.exports = {
   executeSecureTextToSql,
-  normalizeDateAndEntities,
   resolveFastDeterministicSql,
-  inspectSqlSafety,
-  runReadOnlyPsqlJson
+  validateSqlQuery,
+  normalizeDateAndEntities,
+  formatAttendanceResult
 };

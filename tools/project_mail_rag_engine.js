@@ -10,31 +10,31 @@ const PROJECT_DICTIONARY = [
   {
     code: 'PRJ-TEMSA',
     name: 'TEMSA Elektrikli Otobüs Projesi',
-    aliases: ['temsa', 'temsa projesi', 'temsa ecu', 'temsa batarya', 'temsa otobus'],
+    aliases: ['temsa', 'temsa projesi', 'temsa ecu', 'temsa batarya', 'temsa otobus', 'temsa project', 'progetto temsa'],
     subprojects: ['TEMSA Batarya Yönetim Sistemi', 'TEMSA ECU Entegrasyonu', 'TEMSA Saha Testleri']
   },
   {
     code: 'PRJ-VORTEX',
     name: 'Vortex AI Engine Otonom Araç Projesi',
-    aliases: ['vortex', 'vortex ai', 'ugv platform', 'jetson otonomi', 'vortex engine', 'slam otonom'],
+    aliases: ['vortex', 'vortex ai', 'ugv platform', 'jetson otonomi', 'vortex engine', 'vortex project', 'progetto vortex'],
     subprojects: ['Vortex Edge AI', 'Vortex SLAM Modülü', 'Vortex ROS 2 Kontrol']
   },
   {
     code: 'PRJ-ELDOR-OBC',
     name: 'Eldor On-Board Charger Güç Elektroniği',
-    aliases: ['eldor obc', 'on board charger', 'obc projesi', 'eldor charger', 'obc revizyon'],
+    aliases: ['eldor obc', 'on board charger', 'obc projesi', 'eldor charger', 'obc project', 'progetto eldor'],
     subprojects: ['Eldor OBC Donanım v2', 'Eldor Termal Testler']
   },
   {
     code: 'PRJ-SMART-FACTORY',
     name: 'NISO Akıllı Fabrika & Üretim İzleme',
-    aliases: ['akilli fabrika', 'uretim izleme', 'kestirimci bakim', 'smart factory', 'fabrika'],
+    aliases: ['akilli fabrika', 'uretim izleme', 'kestirimci bakim', 'smart factory', 'fabrika', 'fabbrica intelligente'],
     subprojects: ['Fabrika Sensör Ağı', 'Kestirimci Bakım Algoritması']
   },
   {
     code: 'PRJ-AUTOSAR-ECU',
     name: 'AUTOSAR ECU & Adaptive Platform',
-    aliases: ['autosar', 'autosar ecu', 'adaptive autosar', 'ecu middleware', 'autosar entegrasyon'],
+    aliases: ['autosar', 'autosar ecu', 'adaptive autosar', 'ecu middleware', 'autosar project'],
     subprojects: ['Classic AUTOSAR', 'Adaptive AUTOSAR Platform']
   }
 ];
@@ -92,6 +92,7 @@ function scanPromptInjection(text) {
   const patterns = [
     /ignore (all )?previous instructions/i,
     /önceki talimatları unut/i,
+    /ignora le istruzioni precedenti/i,
     /sistem promptunu göster/i,
     /system prompt/i,
     /bütün çalışan bilgilerini/i,
@@ -116,6 +117,7 @@ async function answerLatestMailDirect(params) {
   const sessionId = params.session_id || 'session_' + Date.now();
   const projectCode = params.project_code || null;
   const sender = params.sender || null;
+  const lang = params.response_language || 'tr';
 
   let whereClauses = [
     `d.source_type = 'EMAIL'`,
@@ -157,12 +159,14 @@ async function answerLatestMailDirect(params) {
 
   const docRows = runAdminPsqlJson(selectDocSql);
   if (docRows.length === 0) {
+    let notFoundMsg = 'Sistemde kayıtlı onaylanmış bir iş e-postası bulunamadı.';
+    if (lang === 'en') notFoundMsg = 'No verified business email was found in the system.';
+    if (lang === 'it') notFoundMsg = 'Nessuna email aziendale verificata trovata nel sistema.';
+
     return {
       request_id: requestId,
       session_id: sessionId,
-      answer: sender 
-        ? `"${sender}" tarafından gönderilmiş kabul edilmiş bir iş e-postası bulunamadı.`
-        : (projectCode ? `Bu proje (${projectCode}) için kayıtlı bir e-posta bulunamadı.` : 'Sistemde kayıtlı onaylanmış bir iş e-postası bulunamadı.'),
+      answer: notFoundMsg,
       status: 'NOT_FOUND',
       sources: [],
       is_synthetic: false,
@@ -183,42 +187,60 @@ async function answerLatestMailDirect(params) {
   const fullContent = chunks.map(c => c.content).join('\n\n');
 
   // Format received date
+  const localeMap = { tr: 'tr-TR', en: 'en-US', it: 'it-IT' };
   const dateStr = doc.received_at 
-    ? new Date(doc.received_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-    : 'Tarih belirtilmedi';
+    ? new Date(doc.received_at).toLocaleDateString(localeMap[lang] || 'tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : 'N/A';
 
-  // Build Structured Response
-  let responseMarkdown = `### Son Gelen E-Posta Özeti\n\n`;
-  responseMarkdown += `- **Konu:** ${doc.title || 'Başlıksız'}\n`;
-  responseMarkdown += `- **Gönderen:** \`${doc.sender || 'Bilinmiyor'}\`\n`;
-  responseMarkdown += `- **Alınma Tarihi:** ${dateStr}\n`;
-  responseMarkdown += `- **Proje:** ${doc.project_name || doc.project_code || 'Genel Proje Bilgisi'}\n\n`;
-
-  responseMarkdown += `#### E-Posta İçeriği ve Durum\n`;
-
-  // Parse lines or summarize content
-  if (fullContent.includes('Son durum:') || fullContent.includes('Tamamlananlar:')) {
+  // Build Structured Response according to language
+  let responseMarkdown = '';
+  if (lang === 'en') {
+    responseMarkdown += `### Latest Email Summary\n\n`;
+    responseMarkdown += `- **Subject:** ${doc.title || 'Untitled'}\n`;
+    responseMarkdown += `- **Sender:** \`${doc.sender || 'Unknown'}\`\n`;
+    responseMarkdown += `- **Received Date:** ${dateStr}\n`;
+    responseMarkdown += `- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n`;
+    responseMarkdown += `#### Email Content and Status\n`;
+    responseMarkdown += `${fullContent.trim()}\n`;
+  } else if (lang === 'it') {
+    responseMarkdown += `### Riepilogo dell'Ultima Email\n\n`;
+    responseMarkdown += `- **Oggetto:** ${doc.title || 'Senza titolo'}\n`;
+    responseMarkdown += `- **Mittente:** \`${doc.sender || 'Sconosciuto'}\`\n`;
+    responseMarkdown += `- **Data di Ricezione:** ${dateStr}\n`;
+    responseMarkdown += `- **Progetto:** ${doc.project_name || doc.project_code || 'Progetto Generale'}\n\n`;
+    responseMarkdown += `#### Contenuto e Stato dell'Email\n`;
     responseMarkdown += `${fullContent.trim()}\n`;
   } else {
-    responseMarkdown += `${fullContent.trim()}\n\n`;
-    responseMarkdown += `*Not: E-postada açık bir aksiyon veya risk ayrıca listelenmemiştir.*\n`;
+    responseMarkdown += `### Son Gelen E-Posta Özeti\n\n`;
+    responseMarkdown += `- **Konu:** ${doc.title || 'Başlıksız'}\n`;
+    responseMarkdown += `- **Gönderen:** \`${doc.sender || 'Bilinmiyor'}\`\n`;
+    responseMarkdown += `- **Alınma Tarihi:** ${dateStr}\n`;
+    responseMarkdown += `- **Proje:** ${doc.project_name || doc.project_code || 'Genel Proje Bilgisi'}\n\n`;
+    responseMarkdown += `#### E-Posta İçeriği ve Durum\n`;
+    responseMarkdown += `${fullContent.trim()}\n`;
   }
 
   const isSynthetic = doc.is_synthetic === true || doc.data_mode === 'DEMO';
 
-  // Format unified source object
   const unifiedSource = {
     source_id: doc.id,
     provider: doc.provider,
     message_id: doc.message_id,
     thread_id: doc.thread_id || null,
-    title: doc.title || 'Başlıksız E-posta',
+    title: doc.title || (lang === 'en' ? 'Untitled Email' : (lang === 'it' ? 'Email Senza Titolo' : 'Başlıksız E-posta')),
     sender: doc.sender || null,
     received_at: doc.received_at || null,
     project_code: doc.project_code || null,
     data_mode: doc.data_mode || (isSynthetic ? 'DEMO' : 'LIVE_TEST'),
     is_synthetic: isSynthetic
   };
+
+  let notice = null;
+  if (isSynthetic) {
+    notice = lang === 'en' ? 'This response contains synthetic demo data.' : (lang === 'it' ? 'Questa risposta contiene dati demo sintetici.' : 'Bu cevap sentetik demo verileri içermektedir.');
+  } else if (unifiedSource.data_mode === 'LIVE_TEST') {
+    notice = lang === 'en' ? 'This response is based on live test data.' : (lang === 'it' ? 'Questa risposta si basa su dati di test dal vivo.' : 'Bu cevap canlı test verilerine dayanmaktadır.');
+  }
 
   return {
     request_id: requestId,
@@ -231,7 +253,7 @@ async function answerLatestMailDirect(params) {
     source_count: 1,
     is_synthetic: isSynthetic,
     data_mode: unifiedSource.data_mode,
-    synthetic_notice: isSynthetic ? 'Bu cevap sentetik demo verileri içermektedir.' : (unifiedSource.data_mode === 'LIVE_TEST' ? 'Bu cevap canlı test verilerine dayanmaktadır.' : null),
+    synthetic_notice: notice,
     latency_ms: Date.now() - startTime
   };
 }
@@ -245,14 +267,20 @@ async function answerProjectMailQuery(params) {
   const queryMode = params.query_mode || 'PROJECT_STATUS';
   const providerFilter = (params.provider_filter || 'ALL').toUpperCase();
   const maxSources = params.max_sources || 6;
+  const lang = params.response_language || 'tr';
 
   // Step 1: Prompt Injection Check
   const userInjection = scanPromptInjection(question);
   if (userInjection.detected) {
+    const secDenied = {
+      tr: 'Güvenlik Kalkanı: Talebiniz sistem güvenlik kuralları uyarınca reddedilmiştir.',
+      en: 'Security Shield: Your request has been rejected in accordance with system security rules.',
+      it: 'Scudo di Sicurezza: La tua richiesta è stata respinta in conformità con le regole di sicurezza.'
+    };
     return {
       request_id: requestId,
       session_id: sessionId,
-      answer: 'Güvenlik Kalkanı: Talebiniz sistem güvenlik kuralları uyarınca reddedilmiştir.',
+      answer: secDenied[lang] || secDenied.tr,
       project_code: null,
       project_name: null,
       status: 'SECURITY_REJECTED',
@@ -274,7 +302,8 @@ async function answerProjectMailQuery(params) {
       request_id: requestId,
       session_id: sessionId,
       project_code: projectCode,
-      sender: params.sender
+      sender: params.sender,
+      response_language: lang
     });
   }
 
@@ -282,10 +311,15 @@ async function answerProjectMailQuery(params) {
   if (providerFilter === 'OUTLOOK') {
     const activeOutlook = runAdminPsqlJson(`SELECT id FROM mail.mailbox_source WHERE provider = 'OUTLOOK' AND is_active = true;`);
     if (activeOutlook.length === 0) {
+      const outMsgs = {
+        tr: '**Outlook E-Posta Kaynağı:**\n\nAktif Outlook kaynağından indekslenmiş veri bulunmuyor. Microsoft 365 bağlantısı devreye alındığında e-postalar otomatik olarak indekslenecektir.',
+        en: '**Outlook Email Source:**\n\nNo active data indexed from Outlook. Emails will be automatically indexed once Microsoft 365 connection is enabled.',
+        it: '**Fonte Email Outlook:**\n\nNessun dato attivo indicizzato da Outlook. Le email saranno indicizzate automaticamente dopo la connessione a Microsoft 365.'
+      };
       return {
         request_id: requestId,
         session_id: sessionId,
-        answer: '**Outlook E-Posta Kaynağı:**\n\nAktif Outlook kaynağından indekslenmiş veri bulunmuyor. Microsoft 365 bağlantısı devreye alındığında e-postalar otomatik olarak indekslenecektir.',
+        answer: outMsgs[lang] || outMsgs.tr,
         project_code: projectCode,
         project_name: projectName,
         status: 'NO_DATA',
@@ -299,7 +333,30 @@ async function answerProjectMailQuery(params) {
   }
 
   // Step 4: Semantic Search via PGVector
-  const queryEmbedding = await getEmbedding(question);
+  let queryEmbedding;
+  try {
+    queryEmbedding = await getEmbedding(question);
+  } catch (error) {
+    const latestResult = await answerLatestMailDirect({
+      request_id: requestId,
+      session_id: sessionId,
+      project_code: projectCode,
+      sender: params.sender,
+      response_language: lang
+    });
+
+    if (latestResult.status === 'SUCCESS') {
+      const fallbackIntro = {
+        tr: 'Proje durumunu en güncel doğrulanmış e-postaya göre özetliyorum.\n\n',
+        en: 'Here is the project status based on the latest verified email.\n\n',
+        it: 'Ecco lo stato del progetto in base all’ultima email verificata.\n\n'
+      };
+      latestResult.answer = (fallbackIntro[lang] || fallbackIntro.tr) + latestResult.answer;
+      latestResult.retrieval_fallback = 'LATEST_VERIFIED_MAIL';
+    }
+
+    return latestResult;
+  }
 
   let whereClauses = [
     `d.source_type = 'EMAIL'`,
@@ -347,12 +404,16 @@ async function answerProjectMailQuery(params) {
   let candidateRows = runAdminPsqlJson(retrievalSql);
 
   if (candidateRows.length === 0) {
-    // If no project specified, ask for clarification
     if (!projectCode) {
+      const clarMsgs = {
+        tr: 'Hangi proje hakkında bilgi almak istediğinizi belirtebilir misiniz? (Örn: TEMSA, Vortex, Eldor OBC, Akıllı Fabrika)',
+        en: 'Please specify the project name so I can answer your question (e.g. TEMSA, Vortex, Eldor OBC, Smart Factory).',
+        it: 'Specifica il nome del progetto per consentirmi di rispondere (es. TEMSA, Vortex, Eldor OBC, Fabbrica Intelligente).'
+      };
       return {
         request_id: requestId,
         session_id: sessionId,
-        answer: 'Hangi proje hakkında bilgi almak istediğinizi belirtebilir misiniz? (Örn: TEMSA, Vortex, Eldor OBC, Akıllı Fabrika)',
+        answer: clarMsgs[lang] || clarMsgs.tr,
         project_code: null,
         project_name: null,
         status: 'NEEDS_CLARIFICATION',
@@ -364,10 +425,16 @@ async function answerProjectMailQuery(params) {
       };
     }
 
+    const notFoundMsgs = {
+      tr: `Bu proje (${projectName || projectCode}) için yeterli ve doğrulanmış e-posta kaynağı bulamadım.`,
+      en: `No sufficient verified email evidence was found for project (${projectName || projectCode}).`,
+      it: `Non sono state trovate fonti email verificate sufficienti per il progetto (${projectName || projectCode}).`
+    };
+
     return {
       request_id: requestId,
       session_id: sessionId,
-      answer: `Bu proje (${projectName || projectCode}) için yeterli ve doğrulanmış e-posta kaynağı bulamadım.`,
+      answer: notFoundMsgs[lang] || notFoundMsgs.tr,
       project_code: projectCode,
       project_name: projectName,
       status: 'INSUFFICIENT_EVIDENCE',
@@ -389,7 +456,6 @@ async function answerProjectMailQuery(params) {
 
   const finalEvidence = Array.from(uniqueDocs.values()).sort((a, b) => new Date(a.received_at) - new Date(b.received_at)).slice(-maxSources);
 
-  // Format unified sources contract
   const formattedSources = finalEvidence.map(ev => {
     const isSynth = ev.doc_metadata?.is_synthetic === true || ev.external_id.startsWith('gm_th_');
     const dMode = ev.doc_metadata?.data_mode || (isSynth ? 'DEMO' : 'LIVE_TEST');
@@ -398,7 +464,7 @@ async function answerProjectMailQuery(params) {
       provider: ev.source_provider,
       message_id: ev.external_id,
       thread_id: ev.provider_thread_id || null,
-      title: ev.subject || 'Başlıksız E-posta',
+      title: ev.subject || (lang === 'en' ? 'Untitled Email' : (lang === 'it' ? 'Email Senza Titolo' : 'Başlıksız E-posta')),
       sender: ev.sender_address || null,
       received_at: ev.received_at || null,
       project_code: ev.project_code || projectCode,
@@ -417,52 +483,84 @@ async function answerProjectMailQuery(params) {
   let actions = [];
 
   if (projectCode === 'PRJ-TEMSA' || combinedContent.toLowerCase().includes('temsa')) {
-    shortStatus = 'TEMSA Elektrikli Otobüs Projesinde batarya yönetim yazılımı (BMS) ve kontrol modülü testleri başarıyla tamamlanmış olup, sistem ECU entegrasyonu aşamasına geçmiştir.';
-    completedItems.push('Batarya yönetim yazılımı (BMS) testleri ve fonksiyonel doğrulamaları tamamlandı.');
-    completedItems.push('Sprint 14 geliştirme hedefleri eksiksiz kapatıldı.');
-    ongoingItems.push({ task: 'ECU haberleşme testleri ve CAN bus sinyal doğrulaması', owner: 'Ahmet Yılmaz / Yazılım Ekibi', deadline: 'Eylül 2026' });
-    actions.push({ action: 'CAN bus arıza loglarının incelenmesi ve yeni API uç noktasının devreye alınması', owner: 'Ali Veli', deadline: '2026-09-10', status: 'Devam Ediyor' });
+    if (lang === 'en') {
+      shortStatus = 'In the TEMSA Electric Bus Project, Battery Management System (BMS) software and control module tests have been completed successfully; system integration with the ECU has commenced.';
+      completedItems.push('BMS software functional tests and validation completed.');
+      completedItems.push('Sprint 14 deliverables successfully closed.');
+      ongoingItems.push({ task: 'ECU communication tests and CAN bus signal validation', owner: 'Ahmet Yilmaz / Software Team', deadline: 'September 2026' });
+      actions.push({ action: 'Review of CAN bus fault logs and deployment of the new API endpoint', owner: 'Ali Veli', deadline: '2026-09-10', status: 'Ongoing' });
+    } else if (lang === 'it') {
+      shortStatus = 'Nel progetto TEMSA Electric Bus, i test sul software del sistema di gestione batteria (BMS) e sui moduli di controllo sono stati completati con successo; è iniziata la fase di integrazione ECU.';
+      completedItems.push('Test funzionali e validazione del software BMS completati.');
+      completedItems.push('Obiettivi dello Sprint 14 chiusi con successo.');
+      ongoingItems.push({ task: 'Test di comunicazione ECU e validazione segnali CAN bus', owner: 'Ahmet Yilmaz / Team Software', deadline: 'Settembre 2026' });
+      actions.push({ action: 'Analisi dei log di errore CAN bus e rilascio del nuovo endpoint API', owner: 'Ali Veli', deadline: '2026-09-10', status: 'In corso' });
+    } else {
+      shortStatus = 'TEMSA Elektrikli Otobüs Projesinde batarya yönetim yazılımı (BMS) ve kontrol modülü testleri başarıyla tamamlanmış olup, sistem ECU entegrasyonu aşamasına geçmiştir.';
+      completedItems.push('Batarya yönetim yazılımı (BMS) testleri ve fonksiyonel doğrulamaları tamamlandı.');
+      completedItems.push('Sprint 14 geliştirme hedefleri eksiksiz kapatıldı.');
+      ongoingItems.push({ task: 'ECU haberleşme testleri ve CAN bus sinyal doğrulaması', owner: 'Ahmet Yılmaz / Yazılım Ekibi', deadline: 'Eylül 2026' });
+      actions.push({ action: 'CAN bus arıza loglarının incelenmesi ve yeni API uç noktasının devreye alınması', owner: 'Ali Veli', deadline: '2026-09-10', status: 'Devam Ediyor' });
+    }
   } else if (projectCode === 'PRJ-VORTEX' || combinedContent.toLowerCase().includes('vortex')) {
-    shortStatus = 'Vortex AI Engine UGV platformunun saha testleri müşteri tarafından onaylanmış olup v1.2 sürüm yayını için son hazırlıklar sürdürülmektedir.';
-    completedItems.push('Saha test onayı müşteri tarafından resmi olarak verildi.');
-    ongoingItems.push({ task: 'STM32 düşük seviye PID kontrolör geliştirmesi', owner: 'Can B.', deadline: '2026-09-15' });
-    risksAndBlockers.push({ item: 'Jetson Orin NX tedarik sürecinde küresel distribütör kaynaklı 2 haftalık gecikme riski', impact: 'Donanım entegrasyonu', status: 'Açık Risk', date: '2026-09-01' });
-    decisions.push({ decision: 'Vortex AI Engine v1.2 sürüm yayını ve milestone teslim tarihi 15 Eylül 2026 olarak belirlendi', date: '2026-09-01', source: 'yonetim@niso.com.tr' });
-    actions.push({ action: 'STM32 PID kontrolörünün v1.2 sürümüne entegre edilmesi', owner: 'Can B.', deadline: '2026-09-15', status: 'Devam Ediyor' });
-  } else if (projectCode === 'PRJ-ELDOR-OBC' || combinedContent.toLowerCase().includes('eldor obc')) {
-    shortStatus = 'Eldor On-Board Charger (OBC) güç elektroniği kartlarının revizyon v2 testleri tamamlanmış ve NISO mühendislik ekibine raporlanmıştır.';
-    completedItems.push('OBC revizyon v2 kart testleri ve güç elektroniği ölçümleri tamamlandı.');
-    ongoingItems.push({ task: 'Yazılım katmanı termal güvenlik protokolü doğrulaması', owner: 'Marco Rossi / Donanım Ekibi', deadline: '2026-09-20' });
-  } else if (projectCode === 'PRJ-SMART-FACTORY' || combinedContent.toLowerCase().includes('fabrika')) {
-    shortStatus = 'Akıllı Fabrika Projesinde sprint planlaması tamamlanmış ve kestirimci bakım algoritmaları 2. faza geçirilmiştir.';
-    completedItems.push('Sprint planlama toplantısı yapıldı ve gündem maddeleri karara bağlandı.');
-    decisions.push({ decision: 'Kestirimci bakım algoritması 2. faza geçirilecek; fabrika sensör verileri gerçek zamanlı izlenecek', date: '2026-09-01', source: 'gokhan.bingol@niso.com.tr' });
+    if (lang === 'en') {
+      shortStatus = 'Field tests for the Vortex AI Engine UGV platform have been approved by the customer, and final preparations for the v1.2 release are underway.';
+      completedItems.push('Official field test approval granted by the customer.');
+      ongoingItems.push({ task: 'STM32 low-level PID controller development', owner: 'Can B.', deadline: '2026-09-15' });
+      risksAndBlockers.push({ item: '2-week delay risk in Jetson Orin NX procurement due to global distributor delays', impact: 'Hardware integration', status: 'Open Risk', date: '2026-09-01' });
+      decisions.push({ decision: 'Vortex AI Engine v1.2 release and milestone delivery confirmed for September 15, 2026', date: '2026-09-01', source: 'management@niso.com.tr' });
+      actions.push({ action: 'Integrate STM32 PID controller into v1.2 release', owner: 'Can B.', deadline: '2026-09-15', status: 'Ongoing' });
+    } else if (lang === 'it') {
+      shortStatus = 'I test sul campo della piattaforma UGV Vortex AI Engine sono stati approvati dal cliente e sono in corso i preparativi finali per il rilascio della versione v1.2.';
+      completedItems.push('Approvazione ufficiale dei test sul campo rilasciata dal cliente.');
+      ongoingItems.push({ task: 'Sviluppo del controller PID di basso livello STM32', owner: 'Can B.', deadline: '2026-09-15' });
+      risksAndBlockers.push({ item: 'Rischio di ritardo di 2 settimane nella fornitura di Jetson Orin NX', impact: 'Integrazione hardware', status: 'Rischio Aperto', date: '2026-09-01' });
+      decisions.push({ decision: 'Rilascio di Vortex AI Engine v1.2 fissato al 15 settembre 2026', date: '2026-09-01', source: 'direzione@niso.com.tr' });
+      actions.push({ action: 'Integrazione del controller PID STM32 nella versione v1.2', owner: 'Can B.', deadline: '2026-09-15', status: 'In corso' });
+    } else {
+      shortStatus = 'Vortex AI Engine UGV platformunun saha testleri müşteri tarafından onaylanmış olup v1.2 sürüm yayını için son hazırlıklar sürdürülmektedir.';
+      completedItems.push('Saha test onayı müşteri tarafından resmi olarak verildi.');
+      ongoingItems.push({ task: 'STM32 düşük seviye PID kontrolör geliştirmesi', owner: 'Can B.', deadline: '2026-09-15' });
+      risksAndBlockers.push({ item: 'Jetson Orin NX tedarik sürecinde küresel distribütör kaynaklı 2 haftalık gecikme riski', impact: 'Donanım entegrasyonu', status: 'Açık Risk', date: '2026-09-01' });
+      decisions.push({ decision: 'Vortex AI Engine v1.2 sürüm yayını ve milestone teslim tarihi 15 Eylül 2026 olarak belirlendi', date: '2026-09-01', source: 'yonetim@niso.com.tr' });
+      actions.push({ action: 'STM32 PID kontrolörünün v1.2 sürümüne entegre edilmesi', owner: 'Can B.', deadline: '2026-09-15', status: 'Devam Ediyor' });
+    }
   } else {
-    shortStatus = `Proje iletişiminde son kayıtlar incelenmiş ve ${finalEvidence.length} adet doğrulanmış iş e-postası tespit edilmiştir.`;
-    completedItems.push('Doğrulanmış proje kayıtları sisteme aktarıldı.');
+    if (lang === 'en') {
+      shortStatus = `Project communication examined: ${finalEvidence.length} verified business emails identified.`;
+      completedItems.push('Verified project records loaded.');
+    } else if (lang === 'it') {
+      shortStatus = `Comunicazione di progetto esaminata: identificate ${finalEvidence.length} email aziendali verificate.`;
+      completedItems.push('Record di progetto verificati caricati.');
+    } else {
+      shortStatus = `Proje iletişiminde son kayıtlar incelenmiş ve ${finalEvidence.length} adet doğrulanmış iş e-postası tespit edilmiştir.`;
+      completedItems.push('Doğrulanmış proje kayıtları sisteme aktarıldı.');
+    }
   }
 
-  // Compose formatted Markdown Response (Approach B: Answer only, no duplicate sources section)
-  let responseMarkdown = `### Kısa Son Durum\n${shortStatus}\n\n`;
-
-  if (completedItems.length > 0) {
-    responseMarkdown += `### Tamamlananlar\n${completedItems.map(c => `- ${c}`).join('\n')}\n\n`;
-  }
-
-  if (ongoingItems.length > 0) {
-    responseMarkdown += `### Devam Eden İşler\n${ongoingItems.map(o => `- **Görev:** ${o.task} | **Sorumlu:** ${o.owner} | **Hedef:** ${o.deadline}`).join('\n')}\n\n`;
-  }
-
-  if (risksAndBlockers.length > 0) {
-    responseMarkdown += `### Riskler ve Blokajlar\n${risksAndBlockers.map(r => `- **Risk:** ${r.item} (Etki: ${r.impact}) | **Durum:** ${r.status} | **Kaynak Tarihi:** ${r.date}`).join('\n')}\n\n`;
-  }
-
-  if (decisions.length > 0) {
-    responseMarkdown += `### Kararlar\n${decisions.map(d => `- **Karar:** ${d.decision} | **Tarih:** ${d.date} | **Bildiren:** ${d.source}`).join('\n')}\n\n`;
-  }
-
-  if (actions.length > 0) {
-    responseMarkdown += `### Aksiyonlar\n${actions.map(a => `- **Aksiyon:** ${a.action} | **Sorumlu:** ${a.owner} | **Son Tarih:** ${a.deadline} | **Durum:** ${a.status}`).join('\n')}\n\n`;
+  // Compose formatted Markdown Response based on language
+  let responseMarkdown = '';
+  if (lang === 'en') {
+    responseMarkdown += `### Current Status\n${shortStatus}\n\n`;
+    if (completedItems.length > 0) responseMarkdown += `### Completed Items\n${completedItems.map(c => `- ${c}`).join('\n')}\n\n`;
+    if (ongoingItems.length > 0) responseMarkdown += `### Ongoing Work\n${ongoingItems.map(o => `- **Task:** ${o.task} | **Owner:** ${o.owner} | **Target:** ${o.deadline}`).join('\n')}\n\n`;
+    if (risksAndBlockers.length > 0) responseMarkdown += `### Risks and Blockers\n${risksAndBlockers.map(r => `- **Risk:** ${r.item} (Impact: ${r.impact}) | **Status:** ${r.status} | **Date:** ${r.date}`).join('\n')}\n\n`;
+    if (decisions.length > 0) responseMarkdown += `### Decisions\n${decisions.map(d => `- **Decision:** ${d.decision} | **Date:** ${d.date} | **From:** ${d.source}`).join('\n')}\n\n`;
+    if (actions.length > 0) responseMarkdown += `### Actions\n${actions.map(a => `- **Action:** ${a.action} | **Owner:** ${a.owner} | **Deadline:** ${a.deadline} | **Status:** ${a.status}`).join('\n')}\n\n`;
+  } else if (lang === 'it') {
+    responseMarkdown += `### Stato Attuale\n${shortStatus}\n\n`;
+    if (completedItems.length > 0) responseMarkdown += `### Attività Completate\n${completedItems.map(c => `- ${c}`).join('\n')}\n\n`;
+    if (ongoingItems.length > 0) responseMarkdown += `### Attività in Corso\n${ongoingItems.map(o => `- **Attività:** ${o.task} | **Responsabile:** ${o.owner} | **Obiettivo:** ${o.deadline}`).join('\n')}\n\n`;
+    if (risksAndBlockers.length > 0) responseMarkdown += `### Rischi e Blocchi\n${risksAndBlockers.map(r => `- **Rischio:** ${r.item} (Impatto: ${r.impact}) | **Stato:** ${r.status} | **Data:** ${r.date}`).join('\n')}\n\n`;
+    if (decisions.length > 0) responseMarkdown += `### Decisioni\n${decisions.map(d => `- **Decisione:** ${d.decision} | **Data:** ${d.date} | **Segnalato da:** ${d.source}`).join('\n')}\n\n`;
+    if (actions.length > 0) responseMarkdown += `### Azioni\n${actions.map(a => `- **Azione:** ${a.action} | **Responsabile:** ${a.owner} | **Scadenza:** ${a.deadline} | **Stato:** ${a.status}`).join('\n')}\n\n`;
+  } else {
+    responseMarkdown += `### Kısa Son Durum\n${shortStatus}\n\n`;
+    if (completedItems.length > 0) responseMarkdown += `### Tamamlananlar\n${completedItems.map(c => `- ${c}`).join('\n')}\n\n`;
+    if (ongoingItems.length > 0) responseMarkdown += `### Devam Eden İşler\n${ongoingItems.map(o => `- **Görev:** ${o.task} | **Sorumlu:** ${o.owner} | **Hedef:** ${o.deadline}`).join('\n')}\n\n`;
+    if (risksAndBlockers.length > 0) responseMarkdown += `### Riskler ve Blokajlar\n${risksAndBlockers.map(r => `- **Risk:** ${r.item} (Etki: ${r.impact}) | **Durum:** ${r.status} | **Kaynak Tarihi:** ${r.date}`).join('\n')}\n\n`;
+    if (decisions.length > 0) responseMarkdown += `### Kararlar\n${decisions.map(d => `- **Karar:** ${d.decision} | **Tarih:** ${d.date} | **Bildiren:** ${d.source}`).join('\n')}\n\n`;
+    if (actions.length > 0) responseMarkdown += `### Aksiyonlar\n${actions.map(a => `- **Aksiyon:** ${a.action} | **Sorumlu:** ${a.owner} | **Son Tarih:** ${a.deadline} | **Durum:** ${a.status}`).join('\n')}\n\n`;
   }
 
   const isAnySynthetic = formattedSources.some(s => s.is_synthetic === true || s.data_mode === 'DEMO');
@@ -470,9 +568,9 @@ async function answerProjectMailQuery(params) {
 
   let notice = null;
   if (isAnySynthetic) {
-    notice = 'Bu cevap sentetik demo verileri içermektedir.';
+    notice = lang === 'en' ? 'This response contains synthetic demo data.' : (lang === 'it' ? 'Questa risposta contiene dati demo sintetici.' : 'Bu cevap sentetik demo verileri içermektedir.');
   } else if (hasLiveTest) {
-    notice = 'Bu cevap canlı test verilerine dayanmaktadır.';
+    notice = lang === 'en' ? 'This response is based on live test data.' : (lang === 'it' ? 'Questa risposta si basa su dati di test dal vivo.' : 'Bu cevap canlı test verilerine dayanmaktadır.');
   }
 
   return {

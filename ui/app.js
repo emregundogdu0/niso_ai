@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
         new_chat: 'Yeni Sohbet',
         history: 'Sohbet Geçmişi',
         system_info: 'Sistem Bilgisi',
+        settings: 'Ayarlar',
         secure_conn: 'Güvenli bağlantı',
         greeting_prefix: 'Merhaba',
         greeting_suffix_1: 'Bugün nasıl',
@@ -25,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
         send: 'Gönder',
         attach: 'Dosya Ekle',
         voice: 'Sesli Giriş',
-        suggestion_1: 'TEMSA projesinde son durum',
+        suggestion_1: 'Projelerde son durum nedir?',
         suggestion_2: 'Bugün kimler geç kaldı?',
         suggestion_3: 'Çalışma saatleri nelerdir?',
         footer_note: 'Yanıtlar şirket içi kaynaklardan (İK, Puantaj SQL ve Proje RAG) oluşturulur.',
@@ -43,6 +44,8 @@ document.addEventListener('DOMContentLoaded', () => {
         history_title: 'Sohbet Geçmişi',
         clear_history: 'Geçmişi Temizle',
         no_history: 'Henüz kaydedilmiş sohbet geçmişi bulunmuyor.',
+        sidebar_open: "Sidebar'ı genişlet",
+        sidebar_close: "Sidebar'ı daralt",
         info_title: 'Sistem ve Entegrasyon Durumu',
         info_model: 'Yapay Zekâ Modeli:',
         info_embedding: 'Embedding Modeli:',
@@ -70,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
         new_chat: 'New Chat',
         history: 'Chat History',
         system_info: 'System Info',
+        settings: 'Settings',
         secure_conn: 'Secure connection',
         greeting_prefix: 'Hello',
         greeting_suffix_1: 'How can I',
@@ -80,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
         send: 'Send',
         attach: 'Attach File',
         voice: 'Voice Input',
-        suggestion_1: 'Latest status on TEMSA project',
+        suggestion_1: 'What is the latest status of the projects?',
         suggestion_2: 'Who is late today?',
         suggestion_3: 'What are the working hours?',
         footer_note: 'Answers are generated from internal company sources (HR, Attendance SQL, Project RAG).',
@@ -98,6 +102,8 @@ document.addEventListener('DOMContentLoaded', () => {
         history_title: 'Chat History',
         clear_history: 'Clear History',
         no_history: 'No saved chat history yet.',
+        sidebar_open: 'Expand sidebar',
+        sidebar_close: 'Collapse sidebar',
         info_title: 'System & Integration Status',
         info_model: 'AI Model:',
         info_embedding: 'Embedding Model:',
@@ -125,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         new_chat: 'Nuova Chat',
         history: 'Cronologia Chat',
         system_info: 'Info Sistema',
+        settings: 'Impostazioni',
         secure_conn: 'Connessione sicura',
         greeting_prefix: 'Ciao',
         greeting_suffix_1: 'Come posso',
@@ -135,7 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
         send: 'Invia',
         attach: 'Allega File',
         voice: 'Input Vocale',
-        suggestion_1: 'Ultimo stato sul progetto TEMSA',
+        suggestion_1: 'Qual è lo stato più recente dei progetti?',
         suggestion_2: 'Chi è in ritardo oggi?',
         suggestion_3: 'Quali sono gli orari di lavoro?',
         footer_note: 'Le risposte sono generate da fonti interne aziendali (HR, Presenze SQL, RAG Progetti).',
@@ -153,6 +160,8 @@ document.addEventListener('DOMContentLoaded', () => {
         history_title: 'Cronologia Chat',
         clear_history: 'Cancella Cronologia',
         no_history: 'Nessuna cronologia chat salvata.',
+        sidebar_open: 'Espandi barra laterale',
+        sidebar_close: 'Riduci barra laterale',
         info_title: 'Stato del Sistema e Integrazione',
         info_model: 'Modello AI:',
         info_embedding: 'Modello di Embedding:',
@@ -221,6 +230,14 @@ document.addEventListener('DOMContentLoaded', () => {
         infoBtn.title = this.t('system_info');
         infoBtn.setAttribute('aria-label', this.t('system_info'));
       }
+      const navNewChat = document.getElementById('txtNavNewChat');
+      if (navNewChat) navNewChat.textContent = this.t('new_chat');
+      const navHistory = document.getElementById('txtNavHistory');
+      if (navHistory) navHistory.textContent = this.t('history');
+      const sidebarHistoryTitle = document.getElementById('txtSidebarHistoryTitle');
+      if (sidebarHistoryTitle) sidebarHistoryTitle.textContent = this.t('history');
+      const navSettings = document.getElementById('txtNavSettings');
+      if (navSettings) navSettings.textContent = this.t('settings');
 
       // 4. Secure Connection Badge
       const txtSecure = document.getElementById('txtSecureConn');
@@ -270,6 +287,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (s2) s2.textContent = this.t('suggestion_2');
       const s3 = document.getElementById('txtSugg3');
       if (s3) s3.textContent = this.t('suggestion_3');
+      [s1, s2, s3].forEach(item => {
+        if (item?.parentElement) item.parentElement.setAttribute('data-query', item.textContent);
+      });
 
       // 8. Footer Note
       const footerNote = document.getElementById('txtFooterNote');
@@ -318,6 +338,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const DOM = {
     // Sidebar & Navigation
     sidebarRail: document.getElementById('sidebarRail'),
+    appShell: document.querySelector('.app'),
+    sidebarToggleBtn: document.getElementById('sidebarToggleBtn'),
+    sidebarHistoryList: document.getElementById('sidebarHistoryList'),
     newChatBtn: document.getElementById('newChatBtn'),
     historyBtn: document.getElementById('historyBtn'),
     infoBtn: document.getElementById('infoBtn'),
@@ -608,9 +631,12 @@ document.addEventListener('DOMContentLoaded', () => {
     },
 
     scrollToBottom() {
-      DOM.chatViewport.scrollTo({
-        top: DOM.chatViewport.scrollHeight,
-        behavior: 'smooth'
+      if (!DOM.chatViewport) return;
+      requestAnimationFrame(() => {
+        DOM.chatViewport.scrollTo({
+          top: DOM.chatViewport.scrollHeight,
+          behavior: 'smooth'
+        });
       });
     },
 
@@ -753,7 +779,17 @@ document.addEventListener('DOMContentLoaded', () => {
         DOM.streamLoadingBar.style.display = 'none';
         State.isLoading = false;
         this.setInputsDisabled(false);
+        this.focusActiveInput();
       }
+    },
+
+    focusActiveInput() {
+      const activeInput = DOM.centerHero.style.display === 'none'
+        ? DOM.bottomMessageInput
+        : DOM.heroMessageInput;
+
+      if (!activeInput || activeInput.disabled) return;
+      requestAnimationFrame(() => activeInput.focus({ preventScroll: true }));
     },
 
     setInputsDisabled(disabled) {
@@ -786,7 +822,24 @@ document.addEventListener('DOMContentLoaded', () => {
   // Component 6: Sidebar & Navigation Handlers
   // =========================================================================
   const Sidebar = {
+    setExpanded(expanded) {
+      if (!DOM.sidebarRail) return;
+      DOM.sidebarRail.classList.toggle('expanded', expanded);
+      if (DOM.appShell) DOM.appShell.classList.toggle('sidebar-expanded', expanded);
+      if (DOM.sidebarToggleBtn) {
+        DOM.sidebarToggleBtn.setAttribute('aria-expanded', String(expanded));
+        const label = I18n.t(expanded ? 'sidebar_close' : 'sidebar_open');
+        DOM.sidebarToggleBtn.setAttribute('aria-label', label);
+        DOM.sidebarToggleBtn.title = label;
+      }
+      localStorage.setItem('niso_sidebar_expanded', String(expanded));
+      if (expanded) HistoryManager.renderHistoryList();
+    },
+
     init() {
+      const initiallyExpanded = localStorage.getItem('niso_sidebar_expanded') === 'true';
+      this.setExpanded(initiallyExpanded);
+
       // Language Switcher Click
       if (DOM.langSwitcher) {
         DOM.langSwitcher.querySelectorAll('.lang-btn').forEach(btn => {
@@ -801,6 +854,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (DOM.newChatBtn) {
         DOM.newChatBtn.addEventListener('click', () => {
           ConversationStream.clearMessages();
+          if (window.innerWidth <= 860) DOM.sidebarRail?.classList.remove('open');
+        });
+      }
+
+      if (DOM.sidebarToggleBtn) {
+        DOM.sidebarToggleBtn.addEventListener('click', () => {
+          if (window.innerWidth <= 860 && DOM.sidebarRail.classList.contains('open')) {
+            DOM.sidebarRail.classList.remove('open');
+            return;
+          }
+          this.setExpanded(!DOM.sidebarRail.classList.contains('expanded'));
         });
       }
 
@@ -808,14 +872,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (DOM.mobileMenuBtn && DOM.sidebarRail) {
         DOM.mobileMenuBtn.addEventListener('click', () => {
           DOM.sidebarRail.classList.toggle('open');
+          if (DOM.sidebarRail.classList.contains('open')) this.setExpanded(true);
         });
       }
 
-      // History Modal
-      if (DOM.historyBtn && DOM.historyModal) {
+      // History area inside the expanded sidebar
+      if (DOM.historyBtn) {
         DOM.historyBtn.addEventListener('click', () => {
+          this.setExpanded(true);
           HistoryManager.renderHistoryList();
-          DOM.historyModal.style.display = 'grid';
         });
       }
       if (DOM.closeHistoryBtn) {
@@ -873,18 +938,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       localStorage.setItem('niso_chat_history', JSON.stringify(State.history.slice(0, 30)));
+      this.renderHistoryList();
     },
 
     renderHistoryList() {
-      if (!DOM.historyList) return;
-      DOM.historyList.innerHTML = '';
+      const targets = [DOM.historyList, DOM.sidebarHistoryList].filter(Boolean);
+      if (targets.length === 0) return;
+      targets.forEach(target => { target.innerHTML = ''; });
 
       if (State.history.length === 0) {
-        DOM.historyList.innerHTML = `<p style="color:var(--muted);text-align:center;padding:20px 0;">${I18n.t('no_history')}</p>`;
+        targets.forEach(target => {
+          target.innerHTML = `<p class="sidebar-history-empty">${I18n.t('no_history')}</p>`;
+        });
         return;
       }
 
-      State.history.forEach((h) => {
+      targets.forEach(target => State.history.forEach((h) => {
         const item = document.createElement('div');
         item.className = 'history-item';
         item.innerHTML = `
@@ -894,9 +963,10 @@ document.addEventListener('DOMContentLoaded', () => {
         item.addEventListener('click', () => {
           DOM.historyModal.style.display = 'none';
           this.restoreSession(h);
+          if (window.innerWidth <= 860) DOM.sidebarRail?.classList.remove('open');
         });
-        DOM.historyList.appendChild(item);
-      });
+        target.appendChild(item);
+      }));
     },
 
     restoreSession(sessionData) {

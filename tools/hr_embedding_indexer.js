@@ -102,7 +102,7 @@ async function indexHrPolicies() {
   console.log(`Fetched ${policies.length} approved & valid policy records from hr.policy_item.`);
 
   // 2. Fetch existing documents for hash comparison
-  const existingDocs = runPsqlJson(`SELECT external_id, content_hash, (metadata->>'version')::int AS version, is_active FROM rag.document WHERE source_type = 'hr_policy'`);
+  const existingDocs = runPsqlJson(`SELECT external_id, content_hash, (metadata->>'version')::int AS version, is_active FROM rag.document WHERE UPPER(source_type) = 'HR_POLICY'`);
   const existingDocMap = new Map();
   for (const doc of existingDocs) {
     existingDocMap.set(doc.external_id, doc);
@@ -162,7 +162,7 @@ async function indexHrPolicies() {
             content_hash, source_uri, sensitivity, is_active, metadata
           )
           VALUES (
-            'hr_policy',
+            'HR_POLICY',
             '${policy.policy_code}',
             '${escapedTitle}',
             'HR_POLICY',
@@ -220,7 +220,7 @@ async function indexHrPolicies() {
   }
 
   // Verification Counts
-  const docCountResult = runPsqlJson(`SELECT COUNT(*)::int AS count FROM rag.document WHERE source_type = 'hr_policy' AND is_active = true`);
+  const docCountResult = runPsqlJson(`SELECT COUNT(*)::int AS count FROM rag.document WHERE UPPER(source_type) = 'HR_POLICY' AND is_active = true`);
   const chunkCountResult = runPsqlJson(`SELECT COUNT(*)::int AS count FROM rag.chunk WHERE embedding_model = '${EMBEDDING_MODEL}'`);
 
   const summary = {

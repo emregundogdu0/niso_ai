@@ -1,5 +1,6 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
+const { normalizeText } = require('./date_normalizer');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const EMBEDDING_MODEL = 'qwen3-embedding:0.6b';
@@ -61,6 +62,7 @@ async function retrieveRelevantChunks(question, topK = 4) {
 // Fast Deterministic Knowledge Resolver (< 5ms)
 function resolveFastKnowledgeAnswer(question) {
   const q = question.toLowerCase();
+  const qNorm = normalizeText(question);
 
   // 1. Vortex AI Engine donanım ve teknolojileri
   if (q.includes('vortex') && (q.includes('donanım') || q.includes('teknoloji') || q.includes('özellik') || q.includes('nedir') || q.includes('stack'))) {
@@ -83,7 +85,7 @@ function resolveFastKnowledgeAnswer(question) {
   }
 
   // 3. Eldor Group Kurucu, Merkez, Çalışan ve Araç Sayısı
-  if (q.includes('eldor') && (q.includes('kurucu') || q.includes('kim kurdu') || q.includes('çalışan') || q.includes('genel merkez') || q.includes('kaç araç') || q.includes('profil'))) {
+  if (qNorm.includes('eldor') && (qNorm.includes('kurucu') || qNorm.includes('kim kurdu') || qNorm.includes('sahibi') || qNorm.includes('calisan') || qNorm.includes('genel merkez') || qNorm.includes('kac arac') || qNorm.includes('profil'))) {
     return {
       answer: `**Eldor Group**, 1972 yılında **Pasquale Forte** tarafından kurulmuş çok uluslu bir otomotiv teknolojileri grubudur.\n\n**Temel Kurumsal Bilgiler:**\n- **Kurucu:** Pasquale Forte (1972)\n- **Genel Merkez:** Orsenigo (Como), İtalya\n- **Çalışan Sayısı:** 14 lokasyonda yaklaşık **3.000 çalışan**\n- **Piyasa Etkisi:** Dünya genelinde yaklaşık **400 milyon araç** Eldor teknolojisi ve bileşenleriyle donatılmıştır.\n- **İletişim:** eldor@eldor.it | +39 031 636111\n\n**Doğrulanmış Kaynaklar:**\n- \`[ELDOR Kısa Profil]\` (URL: https://www.eldorgroup.com)\n- \`[ELDOR Kurumsal İletişim]\``,
       sources: [

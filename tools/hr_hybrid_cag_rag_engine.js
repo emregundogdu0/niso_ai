@@ -69,6 +69,7 @@ async function retrieveRagChunks(queryEmbedding, topK = 12) {
     FROM rag.chunk c
     JOIN rag.document d ON c.document_id = d.id
     WHERE d.is_active = true
+      AND UPPER(d.source_type) = 'HR_POLICY'
     ORDER BY c.embedding <=> '${vectorLiteral}'::vector ASC
     LIMIT ${topK}
   `;
@@ -150,6 +151,7 @@ async function generateAnswerWithLlm(question, evidence) {
       model: LLM_MODEL,
       prompt: fullPrompt,
       stream: false,
+      think: false,
       options: {
         temperature: 0.1
       }
@@ -166,6 +168,11 @@ async function generateAnswerWithLlm(question, evidence) {
     rawAnswer = rawAnswer.split('</think>')[1].trim();
   } else {
     rawAnswer = rawAnswer.replace(/<think>/gi, '').trim();
+  }
+
+  const syntheticNote = rawAnswer.match(/>\s*ℹ️\s*\*Not: Bu yanıt sentetik demo İK veri seti üzerinden üretilmiştir\.\*/i);
+  if (syntheticNote) {
+    rawAnswer = rawAnswer.slice(0, syntheticNote.index + syntheticNote[0].length).trim();
   }
 
   if (!rawAnswer || rawAnswer.length < 15) {
