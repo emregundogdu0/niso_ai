@@ -206,6 +206,42 @@ body {
   margin-left: auto;
 }
 
+/* Language Switcher */
+.lang-switcher {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  padding: 2px 3px;
+  gap: 2px;
+  box-shadow: var(--shadow-sm);
+}
+
+.lang-btn {
+  background: none;
+  border: 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: var(--transition);
+  line-height: 1;
+}
+
+.lang-btn:hover {
+  color: var(--navy);
+  background: var(--cyan-light);
+}
+
+.lang-btn.active {
+  background: var(--navy);
+  color: #ffffff;
+}
+
 .secure-badge {
   display: flex;
   align-items: center;
