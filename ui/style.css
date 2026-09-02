@@ -137,13 +137,31 @@ body {
 
 .rail-bottom {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 14px;
+  padding: 0 4px;
+  width: 100%;
+}
+
+.rail-eldor-img {
+  width: 58px;
+  height: auto;
+  max-height: 20px;
+  object-fit: contain;
+  display: block;
+  opacity: 0.85;
+  transition: var(--transition);
+}
+
+.rail-eldor-img:hover {
+  opacity: 1;
 }
 
 .status-indicator-dot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 3px rgba(24, 187, 105, 0.2);
