@@ -61,7 +61,7 @@ async function runAllTests() {
 
   // Test 1: Count Verification
   console.log('--- TEST 1: Document & Chunk Count Check ---');
-  const countDocs = runPsqlJson(`SELECT COUNT(*)::int AS count FROM rag.document WHERE source_type = 'hr_policy' AND is_active = true`);
+  const countDocs = runPsqlJson(`SELECT COUNT(*)::int AS count FROM rag.document WHERE UPPER(source_type) = 'HR_POLICY' AND is_active = true`);
   const countChunks = runPsqlJson(`SELECT COUNT(*)::int AS count FROM rag.chunk WHERE embedding_model = '${EMBEDDING_MODEL}'`);
   const docCount = countDocs[0]?.count || 0;
   const chunkCount = countChunks[0]?.count || 0;
