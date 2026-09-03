@@ -1,6 +1,6 @@
 /**
  * Multilingual Deterministic Date Normalizer (TR, EN, IT)
- * Reference Date for System: 2026-09-02 (Wednesday, Europe/Istanbul).
+ * Uses current date in Europe/Istanbul for relative date expressions.
  */
 
 const MONTHS = {
@@ -17,14 +17,35 @@ const MONTHS = {
 };
 
 function getIstanbulToday() {
-  return new Date('2026-09-02T12:00:00+03:00');
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), 12, 0, 0));
 }
 
 function formatDateIso(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+}
+
+function startOfWeekMonday(date) {
+  const d = new Date(date);
+  const day = d.getUTCDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  return addDays(d, offset);
 }
 
 function normalizeText(str) {
@@ -49,7 +70,7 @@ function parseTurkishDateRange(rawQuestion, lang = 'tr') {
 
 function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
   const qNorm = normalizeText(rawQuestion);
-  const today = getIstanbulToday(); // 2026-09-02
+  const today = getIstanbulToday();
 
   let dateFrom = null;
   let dateTo = null;
@@ -117,7 +138,7 @@ function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
   // 5. Relative terms: Yesterday / Dün / Ieri
   if (qNorm.includes('dun') || qNorm.includes('yesterday') || qNorm.includes('ieri')) {
     const yest = new Date(today);
-    yest.setDate(today.getDate() - 1);
+    yest.setUTCDate(today.getUTCDate() - 1);
     const iso = formatDateIso(yest);
     dateFrom = iso;
     dateTo = iso;
@@ -128,45 +149,54 @@ function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
 
   // 6. Relative terms: This Week / Bu Hafta / Questa Settimana
   if (qNorm.includes('bu hafta') || qNorm.includes('this week') || qNorm.includes('questa settimana')) {
-    dateFrom = '2026-08-31';
-    dateTo = '2026-09-06';
-    dateDesc = lang === 'en' ? 'This Week (31.08.2026 - 06.09.2026)' : (lang === 'it' ? 'Questa Settimana (31.08.2026 - 06.09.2026)' : 'Bu Hafta (31.08.2026 - 06.09.2026)');
+    const weekStart = startOfWeekMonday(today);
+    const weekEnd = addDays(weekStart, 6);
+    dateFrom = formatDateIso(weekStart);
+    dateTo = formatDateIso(weekEnd);
+    dateDesc = lang === 'en' ? `This Week (${dateFrom} - ${dateTo})` : (lang === 'it' ? `Questa Settimana (${dateFrom} - ${dateTo})` : `Bu Hafta (${dateFrom} - ${dateTo})`);
     sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
     return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
   }
 
   // 7. Relative terms: Last Week / Geçen Hafta / Settimana Scorsa
   if (qNorm.includes('gecen hafta') || qNorm.includes('last week') || qNorm.includes('settimana scorsa')) {
-    dateFrom = '2026-08-24';
-    dateTo = '2026-08-30';
-    dateDesc = lang === 'en' ? 'Last Week (24.08.2026 - 30.08.2026)' : (lang === 'it' ? 'Settimana Scorsa (24.08.2026 - 30.08.2026)' : 'Geçen Hafta (24.08.2026 - 30.08.2026)');
+    const thisWeekStart = startOfWeekMonday(today);
+    const lastWeekStart = addDays(thisWeekStart, -7);
+    const lastWeekEnd = addDays(thisWeekStart, -1);
+    dateFrom = formatDateIso(lastWeekStart);
+    dateTo = formatDateIso(lastWeekEnd);
+    dateDesc = lang === 'en' ? `Last Week (${dateFrom} - ${dateTo})` : (lang === 'it' ? `Settimana Scorsa (${dateFrom} - ${dateTo})` : `Geçen Hafta (${dateFrom} - ${dateTo})`);
     sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
     return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
   }
 
   // 8. Relative terms: Last 7 Days / Son 7 Gün / Ultimi 7 Giorni
   if (qNorm.includes('son 7 gun') || qNorm.includes('son yedi gun') || qNorm.includes('last 7 days') || qNorm.includes('ultimi 7 giorni')) {
-    dateFrom = '2026-08-27';
-    dateTo = '2026-09-02';
-    dateDesc = lang === 'en' ? 'Last 7 Days (27.08.2026 - 02.09.2026)' : (lang === 'it' ? 'Ultimi 7 Giorni (27.08.2026 - 02.09.2026)' : 'Son 7 Gün (27.08.2026 - 02.09.2026)');
+    dateFrom = formatDateIso(addDays(today, -6));
+    dateTo = formatDateIso(today);
+    dateDesc = lang === 'en' ? `Last 7 Days (${dateFrom} - ${dateTo})` : (lang === 'it' ? `Ultimi 7 Giorni (${dateFrom} - ${dateTo})` : `Son 7 Gün (${dateFrom} - ${dateTo})`);
     sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
     return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
   }
 
   // 9. Relative terms: This Month / Bu Ay / Questo Mese
   if (qNorm.includes('bu ay') || qNorm.includes('this month') || qNorm.includes('questo mese') || qNorm.includes('eylul ayi') || qNorm.includes('september')) {
-    dateFrom = '2026-09-01';
-    dateTo = '2026-09-30';
-    dateDesc = lang === 'en' ? 'September 2026 (01.09.2026 - 30.09.2026)' : (lang === 'it' ? 'Settembre 2026 (01.09.2026 - 30.09.2026)' : 'Eylül 2026 (01.09.2026 - 30.09.2026)');
+    const year = today.getUTCFullYear();
+    const month = today.getUTCMonth();
+    dateFrom = formatDateIso(new Date(Date.UTC(year, month, 1, 12, 0, 0)));
+    dateTo = formatDateIso(new Date(Date.UTC(year, month + 1, 0, 12, 0, 0)));
+    dateDesc = lang === 'en' ? `This Month (${dateFrom} - ${dateTo})` : (lang === 'it' ? `Questo Mese (${dateFrom} - ${dateTo})` : `Bu Ay (${dateFrom} - ${dateTo})`);
     sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
     return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
   }
 
   // 10. Relative terms: Last Month / Geçen Ay / Mese Scorso
   if (qNorm.includes('gecen ay') || qNorm.includes('last month') || qNorm.includes('mese scorso') || qNorm.includes('agustos ayi') || qNorm.includes('august')) {
-    dateFrom = '2026-08-01';
-    dateTo = '2026-08-31';
-    dateDesc = lang === 'en' ? 'August 2026 (01.08.2026 - 31.08.2026)' : (lang === 'it' ? 'Agosto 2026 (01.08.2026 - 31.08.2026)' : 'Ağustos 2026 (01.08.2026 - 31.08.2026)');
+    const year = today.getUTCFullYear();
+    const month = today.getUTCMonth();
+    dateFrom = formatDateIso(new Date(Date.UTC(year, month - 1, 1, 12, 0, 0)));
+    dateTo = formatDateIso(new Date(Date.UTC(year, month, 0, 12, 0, 0)));
+    dateDesc = lang === 'en' ? `Last Month (${dateFrom} - ${dateTo})` : (lang === 'it' ? `Mese Scorso (${dateFrom} - ${dateTo})` : `Geçen Ay (${dateFrom} - ${dateTo})`);
     sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
     return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
   }

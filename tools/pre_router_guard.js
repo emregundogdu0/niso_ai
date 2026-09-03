@@ -372,7 +372,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     'riassumi l ultima email', 'riassumi lultima email', 'cosa dice l email piu recente', 'cosa dice lemail piu recente', 'riassumi l ultima email del progetto', 'ultima email'
   ];
 
-  const hasMailReference = ['mail', 'eposta', 'e posta'].some(p => norm.includes(p));
+  const hasMailReference = ['mail', 'maili', 'mailler', 'eposta', 'e posta'].some(p => norm.includes(p));
   const hasLatestCue = ['son ', 'en son', 'sonuncu', 'latest', 'most recent', 'last email', 'ultima'].some(p => norm.includes(p));
   const hasYesterdayCue = ['dun', 'yesterday', 'ieri'].some(p => norm.includes(p));
   const hasTodayCue = ['bugun', 'bu gun', 'today', 'oggi'].some(p => norm.includes(p));
@@ -393,10 +393,14 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     bir: 1, iki: 2, uc: 3, dort: 4, bes: 5,
     alti: 6, yedi: 7, sekiz: 8, dokuz: 9, on: 10
   };
+  const ordinalMailMatch = norm.match(/\b(20|1[0-9]|[1-9])\s*(?:inci|nci|uncu|uncu|cu|ci|mail|maili|eposta|e posta)\b/) ||
+    norm.match(/\b(?:mail|maili|eposta|e posta)\s*(20|1[0-9]|[1-9])\b/);
   const numericMatch = norm.match(/\b(20|1[0-9]|[1-9])\b/);
   const wordCount = Object.entries(numberWords).find(([word]) => new RegExp(`\\b${word}\\b`).test(norm));
+  const ordinalWordMail = wordCount && hasMailReference && wantsMailContent ? wordCount[1] : null;
   const hasPluralMailReference = ['mailler', 'mailleri', 'epostalar', 'e postalar', 'emails'].some(p => norm.includes(p));
   const wantsAllArchivedMail = ['tum mailler', 'tum epostalar', 'tum mail arsivi', 'tum eposta arsivi', 'email archive', 'archivio email'].some(p => norm.includes(p));
+  const requestedMailIndex = ordinalMailMatch ? Number(ordinalMailMatch[1]) : ordinalWordMail;
   const requestedMailCount = Math.min(20, Math.max(1, numericMatch ? Number(numericMatch[1]) : (wordCount ? wordCount[1] : ((wantsAllArchivedMail || ((hasTodayCue || hasYesterdayCue) && hasPluralMailReference)) ? 20 : (hasPluralMailReference ? 10 : 1)))));
 
   // Extract Project Code if present
@@ -405,6 +409,29 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   else if (norm.includes('vortex')) extractedProjectCode = 'PRJ-VORTEX';
   else if (norm.includes('eldor obc') || norm.includes('obc')) extractedProjectCode = 'PRJ-ELDOR-OBC';
   else if (norm.includes('smart factory') || norm.includes('fabrika')) extractedProjectCode = 'PRJ-SMART-FACTORY';
+
+  if (requestedMailIndex && hasMailReference && wantsMailContent) {
+    return {
+      is_deterministic: true,
+      detected_language: lang,
+      language_confidence: langConf,
+      response_language: lang,
+      intent: 'PROJECT_MAIL',
+      intent_confidence: 0.98,
+      route_used: 'PROJECT_MAIL',
+      entities: {
+        query_mode: 'MAIL_INDEX',
+        project_code: extractedProjectCode,
+        sender: null,
+        mail_index: Math.min(20, Math.max(1, requestedMailIndex)),
+        mail_count: 1,
+        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : null),
+        response_language: lang
+      },
+      original_question: raw,
+      normalized_question: norm
+    };
+  }
 
   if (isLatestMail || isDatedMail || isArchiveMail) {
     return {
