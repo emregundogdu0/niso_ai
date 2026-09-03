@@ -186,17 +186,34 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   const isThanks = thanksTr.includes(norm) || thanksEn.includes(norm) || thanksIt.includes(norm);
   const isFarewell = farewellsTr.includes(norm) || farewellsEn.includes(norm) || farewellsIt.includes(norm);
 
-  const languagePreferenceTr = ['turkce cevap ver', 'turkce konus', 'turkce devam et'];
-  if (languagePreferenceTr.some(p => norm.includes(p))) {
+  const languagePreferenceMap = [
+    {
+      lang: 'tr',
+      patterns: ['turkce cevap ver', 'turkce konus', 'turkce devam et', 'answer in turkish', 'respond in turkish', 'speak in turkish'],
+      answer: 'Elbette, bundan sonra Türkçe yanıt vereceğim.'
+    },
+    {
+      lang: 'en',
+      patterns: ['ingilizce cevap ver', 'ingilizce konus', 'ingilizce devam et', 'english cevap ver', 'answer in english', 'respond in english', 'speak in english'],
+      answer: 'Sure, I will answer in English from now on.'
+    },
+    {
+      lang: 'it',
+      patterns: ['italyanca cevap ver', 'italyanca konus', 'italyanca devam et', 'italian cevap ver', 'answer in italian', 'respond in italian', 'speak in italian', 'parla italiano', 'rispondi in italiano'],
+      answer: "Certo, da ora in poi risponderò in italiano."
+    }
+  ];
+  const languagePreference = languagePreferenceMap.find(pref => pref.patterns.some(p => norm.includes(p)));
+  if (languagePreference) {
     return {
       is_deterministic: true,
-      detected_language: 'tr',
+      detected_language: languagePreference.lang,
       language_confidence: 1.0,
-      response_language: 'tr',
+      response_language: languagePreference.lang,
       intent: 'SMALL_TALK',
       intent_confidence: 1.0,
-      title: 'Asistan',
-      answer: 'Elbette, bundan sonra Türkçe yanıt vereceğim.',
+      title: languagePreference.lang === 'en' ? 'Assistant' : (languagePreference.lang === 'it' ? 'Assistente' : 'Asistan'),
+      answer: languagePreference.answer,
       route_used: 'LANGUAGE_PREFERENCE_LOCAL',
       retrieval_used: false,
       sources: [],
