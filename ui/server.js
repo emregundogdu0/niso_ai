@@ -461,6 +461,7 @@ const server = http.createServer(async (req, res) => {
               project_code: guardRes.entities?.project_code,
               sender: guardRes.entities?.sender,
               mail_count: guardRes.entities?.mail_count,
+              mail_index: guardRes.entities?.mail_index,
               date_scope: guardRes.entities?.date_scope,
               response_language: activeLang
             });

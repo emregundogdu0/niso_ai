@@ -110,6 +110,34 @@ function scanPromptInjection(text) {
   return { detected: false };
 }
 
+function summarizeMailContent(content, lang = 'tr') {
+  const cleaned = String(content || '')
+    .replace(/^E-POSTA KONUSU:.*$/gmi, '')
+    .replace(/^GÖNDEREN:.*$/gmi, '')
+    .replace(/^TARİH:.*$/gmi, '')
+    .replace(/^PROJE:.*$/gmi, '')
+    .replace(/^İÇERİK:\s*/gmi, '')
+    .replace(/Bu e-posta tamamen sentetik demo verisidir\.?/gi, '')
+    .replace(/([^\n:.;!?])\n(?=[^\n\-*\d])/g, '$1 ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const lines = cleaned
+    .split(/\n+/)
+    .map(line => line.replace(/^[-*]\s*/, '').trim())
+    .filter(line => line && !/^merhaba[,!.]?$/i.test(line));
+
+  const meaningful = lines
+    .filter(line => !/^(tamamlananlar|devam eden isler|devam eden işler|aksiyonlar|bulgular|etkisi|risk|sonuc|sonuç|yeni plan):?$/i.test(line))
+    .slice(0, 6);
+
+  if (meaningful.length === 0) {
+    return lang === 'en' ? 'No summarizable email content was found.' : (lang === 'it' ? 'Non è stato trovato contenuto riassumibile.' : 'Özetlenebilir e-posta içeriği bulunamadı.');
+  }
+
+  return meaningful.map(line => `- ${line}`).join('\n');
+}
+
 // 1. Direct LATEST_MAIL Retrieval & Synthesis (Chronological, Zero-Vector)
 async function answerLatestMailDirect(params) {
   const startTime = Date.now();
@@ -119,8 +147,11 @@ async function answerLatestMailDirect(params) {
   const sender = params.sender || null;
   const lang = params.response_language || 'tr';
   const mailCount = Math.min(20, Math.max(1, Number(params.mail_count) || 1));
+  const mailIndex = Math.min(20, Math.max(1, Number(params.mail_index) || 0));
   const dateScope = params.date_scope || null;
   const queryMode = params.query_mode || 'LATEST_MAIL';
+  const limitCount = queryMode === 'MAIL_INDEX' ? 1 : mailCount;
+  const offsetClause = queryMode === 'MAIL_INDEX' ? `OFFSET ${mailIndex - 1}` : '';
 
   let whereClauses = [
     `d.source_type = 'EMAIL'`,
@@ -163,7 +194,8 @@ async function answerLatestMailDirect(params) {
      AND m.provider = d.source_provider
     WHERE ${whereClauses.join(' AND ')}
     ORDER BY d.received_at DESC
-    LIMIT ${mailCount};
+    LIMIT ${limitCount}
+    ${offsetClause};
   `;
 
   const docRows = runAdminPsqlJson(selectDocSql);
@@ -229,18 +261,20 @@ async function answerLatestMailDirect(params) {
   });
 
   let responseMarkdown = '';
-  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : (dateScope === 'YESTERDAY' ? "Yesterday's" : 'Latest Email Summaries')} (${mailEntries.length})\n\n`;
-  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti')} (${mailEntries.length})\n\n`;
-  else responseMarkdown += `### ${queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri')} (${mailEntries.length})\n\n`;
+  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Email ${mailIndex} Summary` : (queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : (dateScope === 'YESTERDAY' ? "Yesterday's" : 'Latest Email Summaries'))} (${mailEntries.length})\n\n`;
+  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Riepilogo Email ${mailIndex}` : (queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti'))} (${mailEntries.length})\n\n`;
+  else responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `${mailIndex}. E-Posta Özeti` : (queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri'))} (${mailEntries.length})\n\n`;
 
   for (const entry of mailEntries) {
     const { doc, index, fullContent, dateStr } = entry;
+    const displayIndex = queryMode === 'MAIL_INDEX' ? mailIndex : index + 1;
+    const body = (queryMode === 'MAIL_INDEX' || mailEntries.length > 1) ? summarizeMailContent(fullContent, lang) : fullContent;
     if (lang === 'en') {
-      responseMarkdown += `#### ${index + 1}. ${doc.title || 'Untitled'}\n- **Sender:** \`${doc.sender || 'Unknown'}\`\n- **Received:** ${dateStr}\n- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n${fullContent}\n\n`;
+      responseMarkdown += `#### ${displayIndex}. ${doc.title || 'Untitled'}\n- **Sender:** \`${doc.sender || 'Unknown'}\`\n- **Received:** ${dateStr}\n- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n${body}\n\n`;
     } else if (lang === 'it') {
-      responseMarkdown += `#### ${index + 1}. ${doc.title || 'Senza titolo'}\n- **Mittente:** \`${doc.sender || 'Sconosciuto'}\`\n- **Ricevuta:** ${dateStr}\n- **Progetto:** ${doc.project_name || doc.project_code || 'Progetto Generale'}\n\n${fullContent}\n\n`;
+      responseMarkdown += `#### ${displayIndex}. ${doc.title || 'Senza titolo'}\n- **Mittente:** \`${doc.sender || 'Sconosciuto'}\`\n- **Ricevuta:** ${dateStr}\n- **Progetto:** ${doc.project_name || doc.project_code || 'Progetto Generale'}\n\n${body}\n\n`;
     } else {
-      responseMarkdown += `#### ${index + 1}. ${doc.title || 'Başlıksız'}\n- **Gönderen:** \`${doc.sender || 'Bilinmiyor'}\`\n- **Alınma Tarihi:** ${dateStr}\n- **Proje:** ${doc.project_name || doc.project_code || 'Genel Proje Bilgisi'}\n\n${fullContent}\n\n`;
+      responseMarkdown += `#### ${displayIndex}. ${doc.title || 'Başlıksız'}\n- **Gönderen:** \`${doc.sender || 'Bilinmiyor'}\`\n- **Alınma Tarihi:** ${dateStr}\n- **Proje:** ${doc.project_name || doc.project_code || 'Genel Proje Bilgisi'}\n\n${body}\n\n`;
     }
   }
 
@@ -310,13 +344,14 @@ async function answerProjectMailQuery(params) {
   const projectCode = projectInfo.code;
   const projectName = projectInfo.name;
 
-  if (queryMode === 'LATEST_MAIL' || queryMode === 'MAIL_BY_SENDER' || queryMode === 'MAIL_ARCHIVE') {
+  if (queryMode === 'LATEST_MAIL' || queryMode === 'MAIL_BY_SENDER' || queryMode === 'MAIL_ARCHIVE' || queryMode === 'MAIL_INDEX') {
     return answerLatestMailDirect({
       request_id: requestId,
       session_id: sessionId,
       project_code: projectCode,
       sender: params.sender,
       mail_count: params.mail_count,
+      mail_index: params.mail_index,
       date_scope: params.date_scope,
       query_mode: queryMode,
       response_language: lang
