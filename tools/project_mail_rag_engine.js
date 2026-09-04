@@ -1,5 +1,6 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
+const { normalizeText } = require('./date_normalizer');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const EMBEDDING_MODEL = 'qwen3-embedding:0.6b';
@@ -129,6 +130,7 @@ function summarizeMailContent(content, lang = 'tr') {
 
   const meaningful = lines
     .filter(line => !/^(tamamlananlar|devam eden isler|devam eden işler|aksiyonlar|bulgular|etkisi|risk|sonuc|sonuç|yeni plan):?$/i.test(line))
+    .filter(line => !/^[A-ZÇĞİÖŞÜ0-9 &.-]{2,}:$/.test(line))
     .slice(0, 6);
 
   if (meaningful.length === 0) {
@@ -150,6 +152,7 @@ async function answerLatestMailDirect(params) {
   const mailIndex = Math.min(20, Math.max(1, Number(params.mail_index) || 0));
   const dateScope = params.date_scope || null;
   const queryMode = params.query_mode || 'LATEST_MAIL';
+  const summarizeOnly = params.summarize_only === true || queryMode === 'MAIL_INDEX' || queryMode === 'MAIL_SUMMARY';
   const limitCount = queryMode === 'MAIL_INDEX' ? 1 : mailCount;
   const offsetClause = queryMode === 'MAIL_INDEX' ? `OFFSET ${mailIndex - 1}` : '';
 
@@ -261,14 +264,14 @@ async function answerLatestMailDirect(params) {
   });
 
   let responseMarkdown = '';
-  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Email ${mailIndex} Summary` : (queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : (dateScope === 'YESTERDAY' ? "Yesterday's" : 'Latest Email Summaries'))} (${mailEntries.length})\n\n`;
-  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Riepilogo Email ${mailIndex}` : (queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti'))} (${mailEntries.length})\n\n`;
-  else responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `${mailIndex}. E-Posta Özeti` : (queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri'))} (${mailEntries.length})\n\n`;
+  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Email ${mailIndex} Summary` : (queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : (dateScope === 'TODAY' ? "Today's Email Summaries" : (dateScope === 'YESTERDAY' ? "Yesterday's Email Summaries" : 'Latest Email Summaries')))} (${mailEntries.length})\n\n`;
+  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Riepilogo Email ${mailIndex}` : (queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : (dateScope === 'TODAY' ? 'Riepilogo Email di Oggi' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti')))} (${mailEntries.length})\n\n`;
+  else responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `${mailIndex}. E-Posta Özeti` : (queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : (dateScope === 'TODAY' ? 'Bugün Gelen E-Posta Özetleri' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri')))} (${mailEntries.length})\n\n`;
 
   for (const entry of mailEntries) {
     const { doc, index, fullContent, dateStr } = entry;
     const displayIndex = queryMode === 'MAIL_INDEX' ? mailIndex : index + 1;
-    const body = (queryMode === 'MAIL_INDEX' || mailEntries.length > 1) ? summarizeMailContent(fullContent, lang) : fullContent;
+    const body = (summarizeOnly || mailEntries.length > 1) ? summarizeMailContent(fullContent, lang) : fullContent;
     if (lang === 'en') {
       responseMarkdown += `#### ${displayIndex}. ${doc.title || 'Untitled'}\n- **Sender:** \`${doc.sender || 'Unknown'}\`\n- **Received:** ${dateStr}\n- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n${body}\n\n`;
     } else if (lang === 'it') {
@@ -315,6 +318,8 @@ async function answerProjectMailQuery(params) {
   const providerFilter = (params.provider_filter || 'ALL').toUpperCase();
   const maxSources = params.max_sources || 6;
   const lang = params.response_language || 'tr';
+  const normalizedQuestion = normalizeText(question);
+  const summarizeRequested = normalizedQuestion.includes('ozet') || normalizedQuestion.includes('summarize') || normalizedQuestion.includes('riassumi');
 
   // Step 1: Prompt Injection Check
   const userInjection = scanPromptInjection(question);
@@ -354,6 +359,7 @@ async function answerProjectMailQuery(params) {
       mail_index: params.mail_index,
       date_scope: params.date_scope,
       query_mode: queryMode,
+      summarize_only: summarizeRequested,
       response_language: lang
     });
   }
@@ -393,6 +399,7 @@ async function answerProjectMailQuery(params) {
       session_id: sessionId,
       project_code: projectCode,
       sender: params.sender,
+      summarize_only: true,
       response_language: lang
     });
 

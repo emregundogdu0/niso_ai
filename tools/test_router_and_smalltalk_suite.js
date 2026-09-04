@@ -85,6 +85,7 @@ async function runTestSuite() {
     // 5. PROJECT_MAIL
     { category: 'PROJECT_MAIL', query: 'TEMSA projesinde son durum nedir', expectedIntent: 'PROJECT_MAIL', mustNotCallSubwf: false },
     { category: 'PROJECT_MAIL', query: 'merhaba, TEMSA projesindeki riskler nelerdir', expectedIntent: 'PROJECT_MAIL', mustNotCallSubwf: false },
+    { category: 'PROJECT_MAIL', query: 'bu gün maıl geldı mı', expectedIntent: 'PROJECT_MAIL', mustNotCallSubwf: false },
 
     // 6. HYBRID
     { category: 'HYBRID', query: 'TEMSA ekibindeki gecikmeleri ve proje riskini birlikte özetle', expectedIntent: 'HYBRID', mustNotCallSubwf: false },

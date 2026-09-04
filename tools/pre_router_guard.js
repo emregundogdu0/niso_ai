@@ -399,11 +399,18 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     'email gia lette', 'archivio email', 'vecchie email'
   ].some(p => norm.includes(p));
   const wantsMailContent = ['oku', 'ozet', 'icerik', 'ne yaziyor', 'neyle alakali', 'neden bahsediyor'].some(p => norm.includes(p));
+  const hasMailArrivalCue = [
+    'geldi mi', 'gelen var mi', 'mail var mi', 'eposta var mi', 'e posta var mi',
+    'mail geldi', 'eposta geldi', 'e posta geldi',
+    'did any email arrive', 'any email today', 'was there an email',
+    'email arrivata', 'ci sono email', 'e arrivata una email'
+  ].some(p => norm.includes(p));
   const hasNamedProject = ['temsa', 'vortex', 'eldor obc', 'obc', 'smart factory'].some(p => norm.includes(p));
   const isLatestMail = latestMailPhrases.some(p => norm.includes(p)) ||
     (hasMailReference && hasLatestCue) ||
     (hasMailReference && wantsMailContent && hasNamedProject);
-  const isDatedMail = hasMailReference && (hasYesterdayCue || hasTodayCue) && wantsMailContent;
+  const isDatedMail = hasMailReference && (hasYesterdayCue || hasTodayCue) && (wantsMailContent || hasMailArrivalCue);
+  const isArrivalMailCheck = hasMailReference && hasMailArrivalCue;
   const isArchiveMail = hasMailReference && hasArchiveCue;
 
   const numberWords = {
@@ -450,7 +457,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     };
   }
 
-  if (isLatestMail || isDatedMail || isArchiveMail) {
+  if (isLatestMail || isDatedMail || isArchiveMail || isArrivalMailCheck) {
     return {
       is_deterministic: true,
       detected_language: lang,
@@ -474,6 +481,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
 
   // 7. General Project Questions (TEMSA, Vortex status)
   const projectKeywords = [
+    'proje', 'project', 'progetto', 'aksiyon', 'aksiyonlar', 'risk',
     'temsa', 'vortex', 'eldor obc', 'smart factory', 'autosar',
     'son durum', 'latest status', 'current status', 'ultimo stato', 'stato attuale'
   ];
@@ -483,7 +491,8 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   const companyNames = ['niso', 'eldor'];
   const companyQuestionKeywords = [
     'sahibi', 'kurucu', 'kim kurdu', 'ne is yapar', 'faaliyet alani', 'faaliyet alanlari',
-    'genel merkez', 'fabrika adresi', 'nerede', 'urunleri', 'teknolojileri', 'sirket profili'
+    'genel merkez', 'fabrika adresi', 'nerede', 'urun', 'urunleri', 'teknoloji', 'teknolojileri',
+    'teknolojilerle', 'ilgileniyor', 'sirket profili'
   ];
   const hasCompanyKnowledge = companyNames.some(k => norm.includes(k)) &&
     companyQuestionKeywords.some(k => norm.includes(k));

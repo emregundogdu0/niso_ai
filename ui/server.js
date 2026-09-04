@@ -4,6 +4,7 @@
  */
 
 const http = require('http');
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -16,8 +17,11 @@ const { answerCompanyKnowledgeQuestion } = require('../tools/company_knowledge_r
 const { processHybridQuery } = require('../tools/hybrid_evidence_merger');
 const { handleGlobalError } = require('../tools/global_error_handler');
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const DEFAULT_PORT = 3001;
+const PORT = Number(process.env.PORT || DEFAULT_PORT);
+const HOST = process.env.HOST || '127.0.0.1';
+const SHOULD_SCAN_PORTS = !process.env.PORT;
+const PORT_SCAN_LIMIT = Number(process.env.PORT_SCAN_LIMIT || 10);
 
 // Session Language Memory
 const sessionLanguageMap = new Map();
@@ -735,6 +739,36 @@ const server = http.createServer(async (req, res) => {
   res.end('Not Found');
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Management Chatbot Web UI running at http://${HOST}:${PORT}`);
+function probePort(port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer()
+      .once('error', (err) => resolve({ ok: false, code: err.code || 'UNKNOWN' }))
+      .once('listening', () => probe.close(() => resolve({ ok: true })));
+
+    probe.listen(port, HOST);
+  });
+}
+
+async function resolveStartupPort(startPort) {
+  if (!SHOULD_SCAN_PORTS) return startPort;
+
+  for (let candidate = startPort; candidate <= startPort + PORT_SCAN_LIMIT; candidate++) {
+    const result = await probePort(candidate);
+    if (result.ok) return candidate;
+    console.warn(`Port ${candidate} unavailable (${result.code}); trying ${candidate + 1}...`);
+  }
+
+  return startPort;
+}
+
+server.on('error', (err) => {
+  console.error(`Unable to start Management Chatbot Web UI on http://${HOST}:${PORT}`);
+  console.error(err);
+  process.exit(1);
+});
+
+resolveStartupPort(PORT).then((startupPort) => {
+  server.listen(startupPort, HOST, () => {
+    console.log(`Management Chatbot Web UI running at http://${HOST}:${startupPort}`);
+  });
 });

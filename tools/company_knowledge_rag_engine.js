@@ -64,6 +64,36 @@ function resolveFastKnowledgeAnswer(question) {
   const q = question.toLowerCase();
   const qNorm = normalizeText(question);
 
+  // 0. NISO genel şirket profili ve faaliyet alanları
+  if (qNorm.includes('niso') && (
+    qNorm.includes('ne is yapar') ||
+    qNorm.includes('faaliyet') ||
+    qNorm.includes('sirket profili') ||
+    qNorm.includes('hangi teknoloj') ||
+    qNorm.includes('ilgileniyor')
+  )) {
+    return {
+      answer: `**NISO Yazılım Teknolojileri A.Ş.**, otomotiv yazılımı, gömülü sistemler, otonom araç teknolojileri, Endüstri 4.0 ve yenilenebilir enerji yazılımları alanlarında çalışan bir teknoloji şirketidir.\n\n**Başlıca Yetkinlik Alanları:**\n- **Otomotiv Yazılımı:** AUTOSAR Classic/Adaptive, ECU yazılım mimarileri, araç içi haberleşme ve middleware çözümleri.\n- **Fonksiyonel Güvenlik:** ISO 26262 ve ASIL seviyelerine uygun sistem tasarımı süreçleri.\n- **ADAS ve Otonomi:** Sensör füzyonu, çevre algılama, SLAM ve Vortex AI Engine gibi edge AI çözümleri.\n- **Endüstri 4.0:** Üretim izleme, IoT tabanlı fabrika verisi analitiği ve robot kestirimci bakım.\n- **Enerji:** Rüzgâr ve güneş enerjisi sahaları için izleme, analitik ve bakım yazılımları.\n\n**Doğrulanmış Kaynaklar:**\n- \`[NISO Genel Kurumsal ve Teknik Profil]\`\n- \`[NISO-12 AUTOSAR]\` | \`[NISO-13 Functional Safety ISO26262]\` | \`[NISO-14 ADAS]\``,
+      sources: [
+        { tag: '[NISO Genel Kurumsal ve Teknik Profil]', title: 'NISO Genel Kurumsal ve Teknik Profil', url: 'https://www.niso.com.tr', section: 'NISO', similarity: 0.95 }
+      ]
+    };
+  }
+
+  // 0B. Eldor genel şirket profili
+  if (qNorm.includes('eldor') && (
+    qNorm.includes('ne is yapar') ||
+    qNorm.includes('faaliyet') ||
+    qNorm.includes('sirket profili')
+  )) {
+    return {
+      answer: `**Eldor Group**, otomotiv elektroniği, güç elektroniği ve elektrifikasyon alanlarında faaliyet gösteren çok uluslu bir otomotiv teknolojileri grubudur.\n\n**Başlıca Faaliyet Alanları:**\n- **Ateşleme Sistemleri:** Plug-top ateşleme bobinleri ve yüksek enerjili ateşleme çözümleri.\n- **Elektrifikasyon:** Elektrik motorları, elektronik kontrol üniteleri ve manyetik bileşenler.\n- **E-Mobilite:** Şarj istasyonları ve akıllı şehir mobilite çözümleri.\n- **Temiz Enerji:** Yakıt hücreleri, enerji üretimi ve depolama sistemleri.\n- **Küresel Üretim ve Ar-Ge:** İtalya, Türkiye, Çin, Brezilya ve ABD dahil birçok lokasyonda üretim/teknik varlık.\n\n**Doğrulanmış Kaynaklar:**\n- \`[ELDOR Kısa Profil]\`\n- \`[ELDOR Ürün ve Teknoloji Alanları]\``,
+      sources: [
+        { tag: '[ELDOR Kısa Profil]', title: 'Eldor Group — Kısa profil', url: 'https://www.eldorgroup.com', section: 'ELDOR', similarity: 0.95 }
+      ]
+    };
+  }
+
   // 1. Vortex AI Engine donanım ve teknolojileri
   if (q.includes('vortex') && (q.includes('donanım') || q.includes('teknoloji') || q.includes('özellik') || q.includes('nedir') || q.includes('stack'))) {
     return {
@@ -115,7 +145,7 @@ function resolveFastKnowledgeAnswer(question) {
   }
 
   // 4. Eldor Ürünleri ve Teknolojileri
-  if (q.includes('eldor') && (q.includes('ürün') || q.includes('ateşleme') || q.includes('bobin') || q.includes('e-mobilite') || q.includes('motor') || q.includes('co2'))) {
+  if (qNorm.includes('eldor') && (qNorm.includes('urun') || qNorm.includes('teknoloji') || qNorm.includes('teknolojilerle') || qNorm.includes('ilgileniyor') || qNorm.includes('atesleme') || qNorm.includes('bobin') || qNorm.includes('e mobilite') || qNorm.includes('motor') || qNorm.includes('co2'))) {
     return {
       answer: `**Eldor Group Başlıca Ürün ve Teknoloji Alanları:**\n\n- **CO2 Azaltımı:** Plug-top ateşleme bobinleri, yüksek enerjili ateşleme sistemleri, e-yakıt ve hidrojen uygulamaları.\n- **Elektrifikasyon:** Elektrik motorları (e-motor), elektronik kontrol üniteleri (ECU) ve manyetik bileşenler.\n- **Kentsel E-Mobilite:** Şarj istasyonları ve akıllı şehir mobilite çözümleri.\n- **Temiz Enerji:** Yakıt hücreleri, temiz enerji üretimi ve depolama sistemleri.\n\n**Doğrulanmış Kaynaklar:**\n- \`[ELDOR Ürün ve Teknoloji Alanları]\` (URL: https://www.eldorgroup.com)`,
       sources: [
