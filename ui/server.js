@@ -19,6 +19,7 @@ const { processHybridQuery } = require('../tools/hybrid_evidence_merger');
 const { handleGlobalError } = require('../tools/global_error_handler');
 const { evaluateAnswerWithJudge } = require('../tools/llm_as_a_judge');
 const { calculateF1Confidence } = require('../tools/f1_confidence_calculator');
+const { processAndIngestDocument, listUploadedDocuments, deleteUploadedDocument, searchUploadedDocuments } = require('../tools/document_ocr_pipeline');
 
 const DEFAULT_PORT = 3001;
 const PORT = Number(process.env.PORT || DEFAULT_PORT);
@@ -176,10 +177,53 @@ Düşünme aşamalarını (<think>) kesinlikle yanıta ekleme. Doğrudan son kul
 
   const fallbacks = {
     tr: 'Merhaba! Size nasıl yardımcı olabilirim? İK politikaları, personel devam durumu, kurumsal bilgiler veya proje e-postaları hakkında soru sorabilirsiniz.',
-    en: 'Hello! How can I help you today? You can ask about HR policies, attendance records, company knowledge, or project emails.',
     it: 'Ciao! Come posso aiutarti oggi? Puoi chiedermi informazioni sulle politiche HR, sulle presenze, sui documenti aziendali o sulle email di progetto.'
   };
   return fallbacks[lang] || fallbacks.tr;
+}
+
+// Synthesize answer grounded in uploaded documents
+async function queryLlmDocumentAnswer(question, context, lang = 'tr') {
+  const prompt = `Sen NISO AI kurumsal yönetim asistanısın.
+Aşağıda şirketin yüklenmiş belgelerinden (OCR/Doküman veritabanı) alınan doğrulanmış içerik verilmiştir.
+Kullanıcının sorusunu YALNIZCA bu belge içeriğine sadık kalarak, net ve profesyonel biçimde yanıtla.
+Belgede bulunmayan bir bilgiyi kesinlikle uydurma.
+
+Soru: "${question}"
+
+Belge İçeriği:
+${context}
+
+Yanıt:`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const res = await fetch('http://localhost:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'qwen3.5:9b',
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        stream: false,
+        options: { temperature: 0.2, num_predict: 500 }
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      let text = data.message?.content || data.response || '';
+      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      if (text && text.length > 2) return text;
+    }
+  } catch (err) {}
+
+  return 'Yüklenen belgeden edinilen bilgilere göre:\n\n' + context.slice(0, 300) + '...';
 }
 
 const server = http.createServer(async (req, res) => {
@@ -468,6 +512,96 @@ const server = http.createServer(async (req, res) => {
             worked_minutes: workedMinutes
           }
         }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Documents API: List uploaded documents
+  if (req.method === 'GET' && req.url.startsWith('/api/documents') && !req.url.includes('/upload') && !req.url.includes('/delete')) {
+    try {
+      const documents = listUploadedDocuments();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ status: 'OK', documents }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ status: 'ERROR', message: e.message }));
+    }
+    return;
+  }
+
+  // Documents API: Upload and process with OCR / LLM pipeline
+  if (req.method === 'POST' && req.url === '/api/documents/upload') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const fileName = (payload.fileName || payload.filename || 'uploaded_document').trim();
+        const fileData = payload.fileData || payload.file_data || '';
+        const category = (payload.category || 'GENERAL').trim();
+        const projectCode = payload.projectCode || payload.project_code || null;
+
+        if (!fileData) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ status: 'ERROR', message: 'Dosya içeriği (fileData base64) bulunamadı.' }));
+          return;
+        }
+
+        const base64Clean = fileData.replace(/^data:.*?;base64,/, '');
+        const fileBuffer = Buffer.from(base64Clean, 'base64');
+
+        if (fileBuffer.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ status: 'ERROR', message: 'Dosya boyutu geçersiz (0 byte).' }));
+          return;
+        }
+
+        const result = await processAndIngestDocument({
+          fileBuffer,
+          fileName,
+          category,
+          projectCode
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          status: 'OK',
+          message: `${fileName} başarıyla işlendi ve veritabanına eklendi.`,
+          document: result
+        }));
+      } catch (err) {
+        console.error('Document Upload Error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Documents API: Delete document
+  if ((req.method === 'DELETE' || req.method === 'POST') && req.url.startsWith('/api/documents/delete')) {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const parsedUrl = new URL(req.url, 'http://localhost');
+        const queryId = parsedUrl.searchParams.get('id');
+        const payload = body ? JSON.parse(body) : {};
+        const docId = queryId || payload.id || payload.document_id;
+
+        if (!docId) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ status: 'ERROR', message: 'Doküman ID (id) gereklidir.' }));
+          return;
+        }
+
+        const result = deleteUploadedDocument(docId);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ status: 'OK', message: 'Doküman silindi.', result }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
@@ -800,22 +934,56 @@ const server = http.createServer(async (req, res) => {
               normalized_question: userMessage
             };
           } else {
-            // Conversational response with Qwen3.5:9B for general questions & small talk
-            const genAnswer = await queryLlmSmallTalk(userMessage, activeLang);
-            finalResult = {
-              status: 'SUCCESS',
-              intent: 'GENERAL_CHAT',
-              intent_confidence: 0.95,
-              detected_language: activeLang,
-              language_confidence: llmRes.language_confidence || 0.85,
-              response_language: activeLang,
-              title: activeLang === 'en' ? 'Assistant' : (activeLang === 'it' ? 'Assistente' : 'Asistan'),
-              answer: genAnswer,
-              sources: [],
-              retrieval_used: false,
-              original_question: userMessage,
-              normalized_question: userMessage
-            };
+            // Check if query matches any uploaded documents (Document Knowledge Base)
+            let docMatches = [];
+            try {
+              docMatches = await searchUploadedDocuments(userMessage, 3);
+            } catch (err) {}
+
+            const topDoc = docMatches[0];
+            if (topDoc && topDoc.similarity >= 0.45) {
+              const docContext = docMatches.map(m => m.content).join('\n\n');
+              const docSources = docMatches.map(m => ({
+                source_id: m.document_id,
+                title: m.document_title || m.original_filename,
+                provider: 'FILE_UPLOAD',
+                data_mode: 'LIVE',
+                similarity: Number(m.similarity.toFixed(3))
+              }));
+
+              const docAnswer = await queryLlmDocumentAnswer(userMessage, docContext, activeLang);
+              finalResult = {
+                status: 'SUCCESS',
+                intent: 'COMPANY_KNOWLEDGE',
+                intent_confidence: 0.95,
+                detected_language: activeLang,
+                language_confidence: 0.95,
+                response_language: activeLang,
+                title: activeLang === 'en' ? 'Uploaded Document Knowledge' : (activeLang === 'it' ? 'Documento Caricato' : 'Yüklenen Belge Bilgisi'),
+                answer: docAnswer,
+                sources: docSources,
+                retrieval_used: true,
+                original_question: userMessage,
+                normalized_question: userMessage
+              };
+            } else {
+              // Conversational response with Qwen3.5:9B for general questions & small talk
+              const genAnswer = await queryLlmSmallTalk(userMessage, activeLang);
+              finalResult = {
+                status: 'SUCCESS',
+                intent: 'GENERAL_CHAT',
+                intent_confidence: 0.95,
+                detected_language: activeLang,
+                language_confidence: llmRes.language_confidence || 0.85,
+                response_language: activeLang,
+                title: activeLang === 'en' ? 'Assistant' : (activeLang === 'it' ? 'Assistente' : 'Asistan'),
+                answer: genAnswer,
+                sources: [],
+                retrieval_used: false,
+                original_question: userMessage,
+                normalized_question: userMessage
+              };
+            }
           }
         }
 

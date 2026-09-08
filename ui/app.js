@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
         page_title: 'NISO Yönetim Asistanı',
         new_chat: 'Yeni Sohbet',
         attendance_nav: 'Giriş Saatleri (Puantaj)',
+        documents_nav: 'Doküman Yükle (OCR)',
         history: 'Sohbet Geçmişi',
         system_info: 'Sistem Bilgisi',
         settings: 'Ayarlar',
@@ -73,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         page_title: 'NISO Management Assistant',
         new_chat: 'New Chat',
         attendance_nav: 'Attendance',
+        documents_nav: 'Document Upload (OCR)',
         history: 'Chat History',
         system_info: 'System Info',
         settings: 'Settings',
@@ -132,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         page_title: 'NISO Assistente di Direzione',
         new_chat: 'Nuova Chat',
         attendance_nav: 'Presenze',
+        documents_nav: 'Carica Documenti (OCR)',
         history: 'Cronologia Chat',
         system_info: 'Info Sistema',
         settings: 'Impostazioni',
@@ -228,6 +231,11 @@ document.addEventListener('DOMContentLoaded', () => {
         attNavBtn.title = this.t('attendance_nav');
         attNavBtn.setAttribute('aria-label', this.t('attendance_nav'));
       }
+      const docNavBtn = document.getElementById('documentsNavBtn');
+      if (docNavBtn) {
+        docNavBtn.title = this.t('documents_nav');
+        docNavBtn.setAttribute('aria-label', this.t('documents_nav'));
+      }
       const historyBtn = document.getElementById('historyBtn');
       if (historyBtn) {
         historyBtn.title = this.t('history');
@@ -242,6 +250,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (navNewChat) navNewChat.textContent = this.t('new_chat');
       const navAttendance = document.getElementById('txtNavAttendance');
       if (navAttendance) navAttendance.textContent = this.t('attendance_nav');
+      const navDocuments = document.getElementById('txtNavDocuments');
+      if (navDocuments) navDocuments.textContent = this.t('documents_nav');
       const navHistory = document.getElementById('txtNavHistory');
       if (navHistory) navHistory.textContent = this.t('history');
       const sidebarHistoryTitle = document.getElementById('txtSidebarHistoryTitle');
@@ -353,9 +363,31 @@ document.addEventListener('DOMContentLoaded', () => {
     sidebarHistoryList: document.getElementById('sidebarHistoryList'),
     newChatBtn: document.getElementById('newChatBtn'),
     attendanceNavBtn: document.getElementById('attendanceNavBtn'),
+    documentsNavBtn: document.getElementById('documentsNavBtn'),
     historyBtn: document.getElementById('historyBtn'),
     infoBtn: document.getElementById('infoBtn'),
     mobileMenuBtn: document.getElementById('mobileMenuBtn'),
+
+    // Documents / OCR View Elements
+    documentsViewport: document.getElementById('documentsViewport'),
+    docDropZone: document.getElementById('docDropZone'),
+    docFileInput: document.getElementById('docFileInput'),
+    btnBrowseDoc: document.getElementById('btnBrowseDoc'),
+    dropzoneContent: document.getElementById('dropzoneContent'),
+    docSelectedFile: document.getElementById('docSelectedFile'),
+    selectedFileName: document.getElementById('selectedFileName'),
+    selectedFileSize: document.getElementById('selectedFileSize'),
+    btnRemoveSelectedFile: document.getElementById('btnRemoveSelectedFile'),
+    docCategorySelect: document.getElementById('docCategorySelect'),
+    docProjectSelect: document.getElementById('docProjectSelect'),
+    btnProcessDocument: document.getElementById('btnProcessDocument'),
+    docProgressContainer: document.getElementById('docProgressContainer'),
+    docProgressBar: document.getElementById('docProgressBar'),
+    docProgressText: document.getElementById('docProgressText'),
+    docProgressPercent: document.getElementById('docProgressPercent'),
+    btnRefreshDocuments: document.getElementById('btnRefreshDocuments'),
+    docSearchInput: document.getElementById('docSearchInput'),
+    documentsTableBody: document.getElementById('documentsTableBody'),
 
     // Attendance View Elements
     attendanceViewport: document.getElementById('attendanceViewport'),
@@ -1156,9 +1188,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (DOM.chatViewport) DOM.chatViewport.style.display = 'none';
       if (DOM.bottomComposerContainer) DOM.bottomComposerContainer.style.display = 'none';
       if (DOM.streamLoadingBar) DOM.streamLoadingBar.style.display = 'none';
+      if (DOM.documentsViewport) DOM.documentsViewport.style.display = 'none';
       if (DOM.attendanceViewport) DOM.attendanceViewport.style.display = 'flex';
 
       DOM.newChatBtn?.classList.remove('active');
+      DOM.documentsNavBtn?.classList.remove('active');
       DOM.attendanceNavBtn?.classList.add('active');
 
       this.loadDailyRecords();
@@ -1167,12 +1201,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     showChatView() {
       if (DOM.attendanceViewport) DOM.attendanceViewport.style.display = 'none';
+      if (DOM.documentsViewport) DOM.documentsViewport.style.display = 'none';
       if (DOM.chatViewport) DOM.chatViewport.style.display = 'flex';
       if (State.conversation.length > 0 && DOM.bottomComposerContainer) {
         DOM.bottomComposerContainer.style.display = 'block';
       }
 
       DOM.attendanceNavBtn?.classList.remove('active');
+      DOM.documentsNavBtn?.classList.remove('active');
       DOM.newChatBtn?.classList.add('active');
     },
 
@@ -1348,6 +1384,305 @@ document.addEventListener('DOMContentLoaded', () => {
   window.editAttendanceRow = (empNo) => AttendanceManager.editRow(empNo);
 
   // =========================================================================
+  // Component: DocumentsManager (OCR & Document Knowledge Base)
+  // =========================================================================
+  const DocumentsManager = {
+    selectedFile: null,
+    documentsList: [],
+
+    init() {
+      if (!DOM.documentsViewport) return;
+      this.bindEvents();
+      this.loadDocuments();
+    },
+
+    bindEvents() {
+      // Sidebar tab navigation
+      DOM.documentsNavBtn?.addEventListener('click', () => {
+        this.showDocumentsView();
+      });
+
+      // Browse triggers hidden input
+      DOM.btnBrowseDoc?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        DOM.docFileInput?.click();
+      });
+
+      DOM.docDropZone?.addEventListener('click', (e) => {
+        if (e.target.closest('#btnRemoveSelectedFile') || this.selectedFile) return;
+        DOM.docFileInput?.click();
+      });
+
+      DOM.docFileInput?.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+          this.handleFileSelected(e.target.files[0]);
+        }
+      });
+
+      // Drag & drop support
+      ['dragenter', 'dragover'].forEach(eventName => {
+        DOM.docDropZone?.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          DOM.docDropZone.classList.add('drag-over');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        DOM.docDropZone?.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          DOM.docDropZone.classList.remove('drag-over');
+        });
+      });
+
+      DOM.docDropZone?.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        if (dt && dt.files && dt.files[0]) {
+          this.handleFileSelected(dt.files[0]);
+        }
+      });
+
+      // Remove selected file
+      DOM.btnRemoveSelectedFile?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.clearSelectedFile();
+      });
+
+      // Process and Ingest button
+      DOM.btnProcessDocument?.addEventListener('click', async () => {
+        await this.processAndUpload();
+      });
+
+      // Refresh list
+      DOM.btnRefreshDocuments?.addEventListener('click', () => {
+        this.loadDocuments();
+      });
+
+      // Search filter
+      DOM.docSearchInput?.addEventListener('input', () => {
+        this.renderTable();
+      });
+    },
+
+    handleFileSelected(file) {
+      const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg'];
+      const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+      if (!allowedExts.includes(ext)) {
+        alert('Lütfen geçerli bir PDF, PNG veya JPG dosyası seçin.');
+        return;
+      }
+
+      if (file.size > 25 * 1024 * 1024) {
+        alert('Dosya boyutu 25 MB sınırını aşıyor.');
+        return;
+      }
+
+      this.selectedFile = file;
+      if (DOM.selectedFileName) DOM.selectedFileName.textContent = file.name;
+      if (DOM.selectedFileSize) DOM.selectedFileSize.textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      if (DOM.dropzoneContent) DOM.dropzoneContent.style.display = 'none';
+      if (DOM.docSelectedFile) DOM.docSelectedFile.style.display = 'flex';
+      if (DOM.btnProcessDocument) DOM.btnProcessDocument.disabled = false;
+    },
+
+    clearSelectedFile() {
+      this.selectedFile = null;
+      if (DOM.docFileInput) DOM.docFileInput.value = '';
+      if (DOM.dropzoneContent) DOM.dropzoneContent.style.display = 'flex';
+      if (DOM.docSelectedFile) DOM.docSelectedFile.style.display = 'none';
+      if (DOM.btnProcessDocument) DOM.btnProcessDocument.disabled = true;
+    },
+
+    showDocumentsView() {
+      if (DOM.chatViewport) DOM.chatViewport.style.display = 'none';
+      if (DOM.bottomComposerContainer) DOM.bottomComposerContainer.style.display = 'none';
+      if (DOM.streamLoadingBar) DOM.streamLoadingBar.style.display = 'none';
+      if (DOM.attendanceViewport) DOM.attendanceViewport.style.display = 'none';
+      if (DOM.documentsViewport) DOM.documentsViewport.style.display = 'flex';
+
+      DOM.newChatBtn?.classList.remove('active');
+      DOM.attendanceNavBtn?.classList.remove('active');
+      DOM.documentsNavBtn?.classList.add('active');
+
+      this.loadDocuments();
+      if (window.innerWidth <= 860) DOM.sidebarRail?.classList.remove('open');
+    },
+
+    async processAndUpload() {
+      if (!this.selectedFile) return;
+
+      const file = this.selectedFile;
+      const category = DOM.docCategorySelect?.value || 'GENERAL';
+      const projectCode = DOM.docProjectSelect?.value || null;
+
+      if (DOM.btnProcessDocument) DOM.btnProcessDocument.disabled = true;
+      if (DOM.docProgressContainer) DOM.docProgressContainer.style.display = 'block';
+      this.updateProgress(15, 'Dosya okunuyor ve hazırlanıyor...');
+
+      let ticker = null;
+      try {
+        const base64Data = await this.readFileAsBase64(file);
+
+        this.updateProgress(30, 'OCR / Metin analizi ve LLM yapılandırması yapılıyor...');
+
+        ticker = setInterval(() => {
+          const cur = parseInt(DOM.docProgressPercent?.textContent?.replace('%', '') || '30', 10);
+          if (cur < 85) {
+            this.updateProgress(cur + 5, cur > 55 ? 'LLM dokümanı analiz ediyor ve özetliyor...' : 'Metin çıkarımı ve OCR devam ediyor...');
+          }
+        }, 1200);
+
+        const response = await fetch('/api/documents/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            fileData: base64Data,
+            category: category,
+            projectCode: projectCode
+          })
+        });
+
+        if (ticker) clearInterval(ticker);
+
+        const result = await response.json();
+
+        if (result.status === 'OK') {
+          this.updateProgress(100, 'Başarıyla tamamlandı ve vektör veritabanına indekslendi!');
+          setTimeout(() => {
+            if (DOM.docProgressContainer) DOM.docProgressContainer.style.display = 'none';
+            this.clearSelectedFile();
+            this.loadDocuments();
+          }, 1500);
+        } else {
+          throw new Error(result.message || 'Yükleme başarısız oldu.');
+        }
+      } catch (err) {
+        if (ticker) clearInterval(ticker);
+        console.error('Document processing error:', err);
+        this.updateProgress(0, 'Hata: ' + err.message);
+        alert('Doküman işlenirken hata oluştu: ' + err.message);
+      } finally {
+        if (DOM.btnProcessDocument) {
+          DOM.btnProcessDocument.disabled = !this.selectedFile;
+        }
+      }
+    },
+
+    updateProgress(pct, text) {
+      if (DOM.docProgressBar) DOM.docProgressBar.style.width = pct + '%';
+      if (DOM.docProgressPercent) DOM.docProgressPercent.textContent = '%' + pct;
+      if (DOM.docProgressText) DOM.docProgressText.textContent = text;
+    },
+
+    readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result;
+          const commaIdx = res.indexOf(',');
+          resolve(commaIdx >= 0 ? res.substring(commaIdx + 1) : res);
+        };
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+      });
+    },
+
+    async loadDocuments() {
+      if (!DOM.documentsTableBody) return;
+      DOM.documentsTableBody.innerHTML = '<tr><td colspan="7" class="text-center">Yükleniyor...</td></tr>';
+
+      try {
+        const res = await fetch('/api/documents');
+        const data = await res.json();
+        if (data.status === 'OK' && Array.isArray(data.documents)) {
+          this.documentsList = data.documents;
+          this.renderTable();
+        } else {
+          DOM.documentsTableBody.innerHTML = '<tr><td colspan="7" class="text-center">Henüz doküman bulunamadı.</td></tr>';
+        }
+      } catch (err) {
+        console.error('Error loading documents:', err);
+        DOM.documentsTableBody.innerHTML = '<tr><td colspan="7" class="text-center error">Belgeler yüklenemedi: ' + err.message + '</td></tr>';
+      }
+    },
+
+    renderTable() {
+      if (!DOM.documentsTableBody) return;
+      const search = (DOM.docSearchInput?.value || '').toLowerCase().trim();
+
+      let filtered = this.documentsList;
+      if (search) {
+        filtered = filtered.filter(d =>
+          (d.title && d.title.toLowerCase().includes(search)) ||
+          (d.filename && d.filename.toLowerCase().includes(search)) ||
+          (d.project_code && d.project_code.toLowerCase().includes(search)) ||
+          (d.category && d.category.toLowerCase().includes(search))
+        );
+      }
+
+      if (filtered.length === 0) {
+        DOM.documentsTableBody.innerHTML = '<tr><td colspan="7" class="text-center">Hiç kayıtlı doküman bulunamadı.</td></tr>';
+        return;
+      }
+
+      DOM.documentsTableBody.innerHTML = filtered.map(doc => {
+        const dateStr = doc.created_at ? new Date(doc.created_at).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+        const methodBadge = doc.extraction_method === 'PDF_PARSER'
+          ? '<span class="status-badge badge-ontime">PDF Metin</span>'
+          : '<span class="status-badge badge-late">OCR (Tesseract)</span>';
+
+        const categoryBadge = `<span class="cat-badge">${escapeHtml(doc.category || 'GENEL')}</span>`;
+        const projectBadge = doc.project_code
+          ? `<span class="project-pill">${escapeHtml(doc.project_code)}</span>`
+          : '<span class="text-muted">-</span>';
+
+        return `
+          <tr data-doc-id="${doc.id}">
+            <td>
+              <div class="doc-title-cell">
+                <strong>${escapeHtml(doc.title || doc.filename)}</strong>
+                <small class="doc-file-sub">${escapeHtml(doc.filename)}</small>
+              </div>
+            </td>
+            <td>${categoryBadge}</td>
+            <td>${projectBadge}</td>
+            <td>${methodBadge}</td>
+            <td><span class="chunk-badge">${doc.chunk_count || 1} parça</span></td>
+            <td><small>${dateStr}</small></td>
+            <td>
+              <button type="button" class="btn-delete-doc" onclick="deleteDocument('${doc.id}')" title="Belgeyi ve Vektörlerini Sil">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    },
+
+    async deleteDoc(id) {
+      if (!confirm('Bu belgeyi ve hafızadaki tüm vektör parçalarını silmek istediğinizden emin misiniz?')) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/documents/delete?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.status === 'OK') {
+          await this.loadDocuments();
+        } else {
+          alert('Silme başarısız: ' + data.message);
+        }
+      } catch (err) {
+        alert('Hata: ' + err.message);
+      }
+    }
+  };
+
+  window.deleteDocument = (id) => DocumentsManager.deleteDoc(id);
+
+  // =========================================================================
   // Application Bootstrap
   // =========================================================================
   I18n.apply();
@@ -1357,4 +1692,5 @@ document.addEventListener('DOMContentLoaded', () => {
   ChatInput.init();
   SuggestionCards.init();
   AttendanceManager.init();
+  DocumentsManager.init();
 });

@@ -44,6 +44,15 @@
           </svg>
           <span class="nav-label" id="txtNavAttendance">Giriş saatleri</span>
         </button>
+        <button class="nav-btn" id="documentsNavBtn" aria-label="Doküman Yükleme & OCR" title="Doküman Yükle (OCR)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="12" y1="18" x2="12" y2="12"></line>
+            <line x1="9" y1="15" x2="15" y2="15"></line>
+          </svg>
+          <span class="nav-label" id="txtNavDocuments">Doküman yükle</span>
+        </button>
         <button class="nav-btn" id="historyBtn" aria-label="Sohbet Geçmişi" title="Sohbet Geçmişi">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"></circle>
@@ -362,6 +371,131 @@
                   </thead>
                   <tbody id="attendanceTableBody">
                     <tr><td colspan="8" class="text-center">Yükleniyor...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Component: Document Ingestion & OCR Knowledge Base View -->
+      <section class="documents-viewport" id="documentsViewport" style="display: none;">
+        <div class="documents-container">
+          <!-- Header Bar -->
+          <div class="documents-header">
+            <div class="documents-header-info">
+              <h2 class="documents-title">Doküman Yükleme & OCR Bilgi Bankası</h2>
+              <p class="documents-subtitle">PDF, sözleşme, tutanak veya taranmış evrak yükleyin; OCR ve LLM ile analiz edilip anında kurumsal hafızaya (vektör DB) eklensin.</p>
+            </div>
+            <div class="documents-header-controls">
+              <button type="button" class="btn-primary" id="btnRefreshDocuments" title="Yenile">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Yenile
+              </button>
+            </div>
+          </div>
+
+          <!-- Main Upload Grid: Upload Box on left/top, Table on right/bottom -->
+          <div class="documents-grid">
+            <!-- Upload Card -->
+            <div class="documents-card upload-card">
+              <h3 class="card-title">Yeni Doküman Yükle & İndeksle</h3>
+              
+              <!-- Drag & Drop Zone -->
+              <div class="doc-dropzone" id="docDropZone">
+                <input type="file" id="docFileInput" style="display: none;" accept=".pdf,.png,.jpg,.jpeg" />
+                <div class="dropzone-content" id="dropzoneContent">
+                  <div class="dropzone-icon">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="17 8 12 3 7 8"></polyline>
+                      <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                  </div>
+                  <div class="dropzone-text">
+                    <span class="dropzone-title">Dosyayı buraya sürükleyin veya <button type="button" class="btn-link" id="btnBrowseDoc">gözatın</button></span>
+                    <span class="dropzone-hint">Desteklenen formatlar: PDF (Dijital/Taranmış), PNG, JPG, JPEG (Maks. 25 MB)</span>
+                  </div>
+                </div>
+                <div class="dropzone-selected" id="docSelectedFile" style="display: none;">
+                  <span class="selected-file-icon">📄</span>
+                  <div class="selected-file-info">
+                    <span class="selected-file-name" id="selectedFileName">-</span>
+                    <span class="selected-file-size" id="selectedFileSize">-</span>
+                  </div>
+                  <button type="button" class="btn-remove-file" id="btnRemoveSelectedFile" title="Dosyayı Kaldır">&times;</button>
+                </div>
+              </div>
+
+              <!-- Meta Form: Category and Project Select -->
+              <div class="doc-meta-form">
+                <div class="form-group">
+                  <label for="docCategorySelect">Doküman Kategorisi:</label>
+                  <select id="docCategorySelect" class="form-control">
+                    <option value="GENERAL">Genel Şirket Dokümanı</option>
+                    <option value="PROJECT_DOC">Proje Dokümanı / Rapor</option>
+                    <option value="HR_POLICY">İK Politikası / Prosedür</option>
+                    <option value="SPECIFICATION">Teknik Şartname / Standart</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="docProjectSelect">İlişkili Proje (Opsiyonel):</label>
+                  <select id="docProjectSelect" class="form-control">
+                    <option value="">Otomatik Proje Tespiti</option>
+                    <option value="PRJ-TEMSA">TEMSA Elektrikli Otobüs</option>
+                    <option value="PRJ-VORTEX">Vortex AI Otonom Araç</option>
+                    <option value="PRJ-ELDOR-OBC">Eldor On-Board Charger</option>
+                    <option value="PRJ-SMART-FACTORY">NISO Akıllı Fabrika</option>
+                    <option value="PRJ-AUTOSAR-ECU">AUTOSAR ECU & Adaptive</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Submit Action Button -->
+              <button type="button" class="btn-primary btn-block" id="btnProcessDocument" disabled>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                OCR ile Oku, LLM ile Düzenle & Veritabanına Ekle
+              </button>
+
+              <!-- Live Progress Card (Visible during upload) -->
+              <div class="doc-progress-container" id="docProgressContainer" style="display: none;">
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" id="docProgressBar" style="width: 0%;"></div>
+                </div>
+                <div class="progress-status-row">
+                  <span class="progress-text" id="docProgressText">İşlem başlatılıyor...</span>
+                  <span class="progress-percent" id="docProgressPercent">%0</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Documents Table Card -->
+            <div class="documents-card table-card">
+              <div class="table-header-row">
+                <h3 class="card-title">Kayıtlı ve İndekslenmiş Belgeler</h3>
+                <div class="table-search-box">
+                  <input type="text" id="docSearchInput" placeholder="Belgelerde ara..." class="search-input" />
+                </div>
+              </div>
+
+              <div class="table-wrapper">
+                <table class="att-table doc-table" id="documentsTable">
+                  <thead>
+                    <tr>
+                      <th>Belge Adı / Başlık</th>
+                      <th>Kategori</th>
+                      <th>Proje</th>
+                      <th>Yöntem</th>
+                      <th>Parça</th>
+                      <th>Tarih</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody id="documentsTableBody">
+                    <tr><td colspan="7" class="text-center">Kayıtlar yükleniyor...</td></tr>
                   </tbody>
                 </table>
               </div>
