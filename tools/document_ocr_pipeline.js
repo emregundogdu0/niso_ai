@@ -381,6 +381,31 @@ async function searchUploadedDocuments(query, topK = 4) {
   const queryEmbedding = await getEmbedding(query);
   const vectorStr = `[${queryEmbedding.join(',')}]`;
 
+  // Extract query keywords for hybrid matching
+  const stopWords = new Set([
+    've', 'veya', 'ile', 'için', 'hakkında', 'olan', 'gibi', 'bilgi', 'ver', 'nedir', 'nelerdir',
+    'bana', 'bir', 'bu', 'şu', 'the', 'and', 'for', 'about', 'son', 'durum', 'durumu', 'kaç',
+    'gün', 'kimler', 'ne', 'nasıl', 'var', 'mı', 'mi', 'mu', 'mü', 'nerede', 'kim', 'bunun'
+  ]);
+  const tokens = (query || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9ğüşıöç]/gi, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 2 && !stopWords.has(t));
+
+  let keywordClause = '0.0';
+  if (tokens.length > 0) {
+    const patterns = tokens.map(t => `'%' || '${t.replace(/'/g, "''")}' || '%'`).join(', ');
+    keywordClause = `(
+      CASE 
+        WHEN lower(d.title) LIKE ANY(ARRAY[${patterns}]) THEN 0.35
+        WHEN lower(d.metadata->>'original_filename') LIKE ANY(ARRAY[${patterns}]) THEN 0.30
+        WHEN lower(c.content) LIKE ANY(ARRAY[${patterns}]) THEN 0.20
+        ELSE 0.0
+      END
+    )`;
+  }
+
   const sql = `
     SELECT 
       c.id,
@@ -391,11 +416,13 @@ async function searchUploadedDocuments(query, topK = 4) {
       d.project_code,
       d.metadata->>'original_filename' as original_filename,
       d.metadata->>'category' as category,
-      1 - (c.embedding <=> '${vectorStr}'::vector) as similarity
+      ROUND((1 - (c.embedding <=> '${vectorStr}'::vector))::numeric, 4) as vector_similarity,
+      ROUND((${keywordClause})::numeric, 4) as keyword_boost,
+      ROUND(((1 - (c.embedding <=> '${vectorStr}'::vector)) + ${keywordClause})::numeric, 4) as similarity
     FROM rag.chunk c
     JOIN rag.document d ON d.id = c.document_id
     WHERE d.source_type = 'FILE_UPLOAD' AND d.is_active = true
-    ORDER BY c.embedding <=> '${vectorStr}'::vector ASC
+    ORDER BY similarity DESC
     LIMIT ${topK};
   `;
 

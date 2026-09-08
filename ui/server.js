@@ -184,10 +184,12 @@ Düşünme aşamalarını (<think>) kesinlikle yanıta ekleme. Doğrudan son kul
 
 // Synthesize answer grounded in uploaded documents
 async function queryLlmDocumentAnswer(question, context, lang = 'tr') {
+  const langPrompt = lang === 'en' ? 'Respond in English.' : (lang === 'it' ? 'Rispondi in italiano.' : 'Türkçe yanıtla.');
   const prompt = `Sen NISO AI kurumsal yönetim asistanısın.
 Aşağıda şirketin yüklenmiş belgelerinden (OCR/Doküman veritabanı) alınan doğrulanmış içerik verilmiştir.
-Kullanıcının sorusunu YALNIZCA bu belge içeriğine sadık kalarak, net ve profesyonel biçimde yanıtla.
-Belgede bulunmayan bir bilgiyi kesinlikle uydurma.
+Kullanıcının sorusunu YALNIZCA bu belge içeriğine sadık kalarak, net, detaylı ve profesyonel biçimde yanıtla.
+Eğer belge bir CV veya özgeçmiş ise; kişinin çalışma alanlarını, projelerini, uzmanlıklarını, teknik yetkinliklerini ve iletişim/lokasyon bilgilerini özetle.
+Belgede bulunmayan bir bilgiyi kesinlikle uydurma. ${langPrompt}
 
 Soru: "${question}"
 
@@ -198,18 +200,17 @@ Yanıt:`;
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    const timeout = setTimeout(() => controller.abort(), 40000);
 
-    const res = await fetch('http://localhost:11434/api/chat', {
+    const res = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'qwen3.5:9b',
-        messages: [
-          { role: 'user', content: prompt }
-        ],
+        prompt: prompt,
         stream: false,
-        options: { temperature: 0.2, num_predict: 500 }
+        think: false,
+        options: { temperature: 0.1, num_predict: 700 }
       }),
       signal: controller.signal
     });
@@ -217,13 +218,13 @@ Yanıt:`;
 
     if (res.ok) {
       const data = await res.json();
-      let text = data.message?.content || data.response || '';
+      let text = (data.response || '').trim();
       text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
       if (text && text.length > 2) return text;
     }
   } catch (err) {}
 
-  return 'Yüklenen belgeden edinilen bilgilere göre:\n\n' + context.slice(0, 300) + '...';
+  return 'Yüklenen belgeden edinilen bilgilere göre:\n\n' + context.slice(0, 400) + '...';
 }
 
 const server = http.createServer(async (req, res) => {
@@ -700,24 +701,63 @@ const server = http.createServer(async (req, res) => {
         // Update session language state
         sessionLanguageMap.set(sessionId, activeLang);
 
-        if (guardRes.is_deterministic) {
-          if (guardRes.intent === 'SECURITY_REJECTED') {
+        if (guardRes.is_deterministic && guardRes.intent === 'SECURITY_REJECTED') {
+          finalResult = {
+            status: 'SECURITY_REJECTED',
+            intent: guardRes.intent,
+            intent_confidence: guardRes.intent_confidence,
+            detected_language: activeLang,
+            language_confidence: guardRes.language_confidence,
+            response_language: activeLang,
+            title: guardRes.title,
+            answer: guardRes.answer,
+            sources: [],
+            route_used: guardRes.route_used,
+            retrieval_used: false,
+            original_question: userMessage,
+            normalized_question: guardRes.normalized_question
+          };
+        }
+
+        // Priority Check: Uploaded Document Knowledge Base (CV, specifications, uploaded PDFs/files)
+        if (!finalResult) {
+          const isExplicitDocQuery = /\b(cv|özgeçmiş|ozgecmis|doküman|dokuman|belge|dosya|pdf|yüklenen|yuklenen|şartname|sartname|yönetmelik|yonetmelik)\b/i.test(userMessage);
+          let docMatches = [];
+          try {
+            docMatches = await searchUploadedDocuments(userMessage, 4);
+          } catch (err) {}
+
+          const topDoc = docMatches[0];
+          if (topDoc && ((isExplicitDocQuery && topDoc.similarity >= 0.35) || topDoc.similarity >= 0.52)) {
+            const docContext = docMatches.map(m => m.content).join('\n\n');
+            const docSources = docMatches.map(m => ({
+              source_id: m.document_id,
+              title: m.document_title || m.original_filename,
+              provider: 'FILE_UPLOAD',
+              data_mode: 'LIVE',
+              similarity: Number(m.similarity.toFixed(3))
+            }));
+
+            const docAnswer = await queryLlmDocumentAnswer(userMessage, docContext, activeLang);
             finalResult = {
-              status: 'SECURITY_REJECTED',
-              intent: guardRes.intent,
-              intent_confidence: guardRes.intent_confidence,
+              status: 'SUCCESS',
+              intent: 'COMPANY_KNOWLEDGE',
+              intent_confidence: 0.95,
               detected_language: activeLang,
-              language_confidence: guardRes.language_confidence,
+              language_confidence: 0.95,
               response_language: activeLang,
-              title: guardRes.title,
-              answer: guardRes.answer,
-              sources: [],
-              route_used: guardRes.route_used,
-              retrieval_used: false,
+              title: activeLang === 'en' ? 'Uploaded Document Knowledge' : (activeLang === 'it' ? 'Documento Caricato' : 'Yüklenen Belge Bilgisi (CV / Doküman)'),
+              answer: docAnswer,
+              sources: docSources,
+              retrieval_used: true,
               original_question: userMessage,
-              normalized_question: guardRes.normalized_question
+              normalized_question: userMessage
             };
-          } else if (guardRes.intent === 'SMALL_TALK' || guardRes.intent === 'HELP') {
+          }
+        }
+
+        if (!finalResult && guardRes.is_deterministic) {
+          if (guardRes.intent === 'SMALL_TALK' || guardRes.intent === 'HELP') {
             const stAnswer = await queryLlmSmallTalk(userMessage, activeLang);
             finalResult = {
               status: 'SUCCESS',
@@ -845,7 +885,9 @@ const server = http.createServer(async (req, res) => {
               normalized_question: guardRes.normalized_question
             };
           }
-        } else {
+        }
+
+        if (!finalResult) {
           // 4. Non-deterministic query -> LLM Intent & Language Classification
           const llmRes = await queryLlmIntent(userMessage, activeLang);
           activeLang = llmRes.language || activeLang;
