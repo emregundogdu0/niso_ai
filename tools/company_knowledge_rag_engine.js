@@ -268,43 +268,12 @@ KURALLAR:
    - Detay maddeleri.
    - Doğrulanmış Kaynaklar listesi (Örn: \`[NISO-01 Autonomous Vehicle]\`, \`[ELDOR Kurumsal Profil]\`).`;
 
-async function answerCompanyKnowledgeQuestion(question, sessionId = 'knowledge_session') {
+async function answerCompanyKnowledgeQuestion(question, sessionId = 'knowledge_session', lang = 'tr') {
   const startTime = Date.now();
   const requestId = crypto.randomUUID();
 
-  // 1. Check Fast Deterministic Knowledge Resolver (< 5ms)
-  const fastResult = resolveFastKnowledgeAnswer(question);
-  if (fastResult) {
-    const latencyMs = Date.now() - startTime;
-    try {
-      const escapedQ = question.replace(/'/g, "''");
-      const metadata = {
-        mode: 'deterministic_fast',
-        sources: fastResult.sources.map(s => s.tag),
-        source_count: fastResult.sources.length
-      };
-      runAdminPsql(`
-        INSERT INTO audit.chat_request (
-          request_id, session_id, question, intent,
-          confidence, status, latency_ms, metadata, created_at
-        ) VALUES (
-          '${requestId}', '${sessionId}', '${escapedQ}', 'COMPANY_TECH_KNOWLEDGE',
-          0.995, 'SUCCESS', ${latencyMs},
-          '${JSON.stringify(metadata).replace(/'/g, "''")}'::jsonb, now()
-        );
-      `);
-    } catch (e) {}
-
-    return {
-      request_id: requestId,
-      session_id: sessionId,
-      question,
-      status: 'SUCCESS',
-      answer: fastResult.answer,
-      sources: fastResult.sources,
-      latency_ms: latencyMs
-    };
-  }
+  // Fast Deterministic Knowledge Resolver disabled in favor of real DB pgvector retrieval & LLM generation
+  // const fastResult = resolveFastKnowledgeAnswer(question);
 
   // 2. Retrieve Knowledge Chunks via PGVector
   let chunks = [];
@@ -342,24 +311,23 @@ async function answerCompanyKnowledgeQuestion(question, sessionId = 'knowledge_s
     contextText += `--- KANIT ${idx + 1} (${srcTag}) ---\n${c.chunk_content}\n\n`;
   });
 
-  const userPrompt = `KANITLAR:\n${contextText}\nKULLANICI SORUSU: "${question}"\n\nYukarıdaki kanıtlara göre soruyu doğrudan ve sadece Türkçe yanıtla:`;
+  const langName = lang === 'en' ? 'English' : (lang === 'it' ? 'Italian' : 'Turkish');
+  const fullPrompt = `${SYSTEM_PROMPT}\n\nKANITLAR:\n${contextText}\n\nKULLANICI SORUSU: "${question}"\n\nYukarıdaki kanıtlara göre soruyu doğrudan ve sadece ${langName} dilinde yanıtla:\nCEVAP:`;
 
   // 4. Generate Answer with Qwen3.5-9B
   let answerText = '';
   try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: LLM_MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt }
-        ],
+        prompt: fullPrompt,
         stream: false,
+        think: false,
         options: {
           temperature: 0.1,
-          num_predict: 500
+          num_predict: 800
         }
       })
     });
@@ -369,12 +337,18 @@ async function answerCompanyKnowledgeQuestion(question, sessionId = 'knowledge_s
     }
 
     const data = await response.json();
-    let raw = data.message?.content || data.response || '';
-    answerText = raw
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    let raw = (data.response || '').trim();
+    if (raw.includes('</think>')) {
+      answerText = raw.split('</think>')[1].trim();
+    } else {
+      answerText = raw.replace(/<think>/gi, '').trim();
+    }
+    answerText = answerText
       .replace(/Thinking Process:[\s\S]*?(?=\n\n[A-ZÇĞİÖŞÜa-zçğıöşü]|\n\*\*)/gi, '')
       .trim();
-    if (!answerText) answerText = raw.trim();
+    if (!answerText) {
+      answerText = raw.trim();
+    }
   } catch (err) {
     answerText = 'Yapay zekâ yanıt üretirken bir hata oluştu: ' + err.message;
   }

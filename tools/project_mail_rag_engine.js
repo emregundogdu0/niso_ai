@@ -1,6 +1,6 @@
 const { execSync } = require('child_process');
 const crypto = require('crypto');
-const { normalizeText } = require('./date_normalizer');
+const { normalizeText, parseMultilingualDateRange } = require('./date_normalizer');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const EMBEDDING_MODEL = 'qwen3-embedding:0.6b';
@@ -111,7 +111,7 @@ function scanPromptInjection(text) {
   return { detected: false };
 }
 
-function summarizeMailContent(content, lang = 'tr') {
+async function summarizeMailContentWithLlm(content, lang = 'tr') {
   const cleaned = String(content || '')
     .replace(/^E-POSTA KONUSU:.*$/gmi, '')
     .replace(/^GÖNDEREN:.*$/gmi, '')
@@ -119,10 +119,54 @@ function summarizeMailContent(content, lang = 'tr') {
     .replace(/^PROJE:.*$/gmi, '')
     .replace(/^İÇERİK:\s*/gmi, '')
     .replace(/Bu e-posta tamamen sentetik demo verisidir\.?/gi, '')
-    .replace(/([^\n:.;!?])\n(?=[^\n\-*\d])/g, '$1 ')
-    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+  if (!cleaned || cleaned.length < 20) {
+    return lang === 'en' ? 'No summarizable email content was found.' : (lang === 'it' ? 'Non è stato trovato contenuto riassumibile.' : 'Özetlenebilir e-posta içeriği bulunamadı.');
+  }
+
+  const langName = lang === 'en' ? 'English' : (lang === 'it' ? 'Italian' : 'Turkish');
+  const prompt = `Aşağıdaki e-posta metnini oku ve önemli noktalarını (yapılan işler, bulgular, riskler ve sonraki adımlar) 2-4 maddelik net ve profesyonel bir özet olarak ${langName} dilinde yaz.
+Düşünme aşamalarını (think) yazma. Doğrudan maddeleri üret.
+
+E-POSTA METNİ:
+${cleaned.substring(0, 2000)}`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        messages: [
+          { role: 'system', content: 'Sen NISO yönetim asistanısın. E-postaları yöneticiler için hızlı, doğru ve profesyonelce özetle.' },
+          { role: 'user', content: prompt }
+        ],
+        stream: false,
+        options: { temperature: 0.2, num_predict: 250 }
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      let text = data.message?.content || data.response || '';
+      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      if (text && text.length > 15) {
+        return text;
+      }
+    }
+  } catch (err) {}
+
+  // Fallback if LLM unavailable
+  return summarizeMailContentFallback(cleaned, lang);
+}
+
+function summarizeMailContentFallback(cleaned, lang = 'tr') {
   const lines = cleaned
     .split(/\n+/)
     .map(line => line.replace(/^[-*]\s*/, '').trim())
@@ -151,9 +195,11 @@ async function answerLatestMailDirect(params) {
   const mailCount = Math.min(20, Math.max(1, Number(params.mail_count) || 1));
   const mailIndex = Math.min(20, Math.max(1, Number(params.mail_index) || 0));
   const dateScope = params.date_scope || null;
-  const queryMode = params.query_mode || 'LATEST_MAIL';
+  const dateInfo = (!params.target_date && params.question) ? parseMultilingualDateRange(params.question, lang) : null;
+  const targetDate = params.target_date || (dateInfo?.dateFrom) || (dateScope && /^\d{4}-\d{2}-\d{2}$/.test(dateScope) ? dateScope : null);
+  const queryMode = params.query_mode || (targetDate ? 'SPECIFIC_DATE' : 'LATEST_MAIL');
   const summarizeOnly = params.summarize_only === true || queryMode === 'MAIL_INDEX' || queryMode === 'MAIL_SUMMARY';
-  const limitCount = queryMode === 'MAIL_INDEX' ? 1 : mailCount;
+  const limitCount = queryMode === 'MAIL_INDEX' ? 1 : (targetDate ? Math.max(5, mailCount) : mailCount);
   const offsetClause = queryMode === 'MAIL_INDEX' ? `OFFSET ${mailIndex - 1}` : '';
 
   let whereClauses = [
@@ -172,7 +218,9 @@ async function answerLatestMailDirect(params) {
     whereClauses.push(`d.sender_address ILIKE '%${sender.replace(/'/g, "''")}%'`);
   }
   const archiveWhereClauses = [...whereClauses];
-  if (dateScope === 'YESTERDAY') {
+  if (targetDate) {
+    whereClauses.push(`(d.received_at AT TIME ZONE 'Europe/Istanbul')::date = '${targetDate}'::date`);
+  } else if (dateScope === 'YESTERDAY') {
     whereClauses.push(`(d.received_at AT TIME ZONE 'Europe/Istanbul')::date = ((CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date - 1)`);
   } else if (dateScope === 'TODAY') {
     whereClauses.push(`(d.received_at AT TIME ZONE 'Europe/Istanbul')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date`);
@@ -263,15 +311,19 @@ async function answerLatestMailDirect(params) {
     return { doc, index, fullContent, dateStr, isSynthetic, source };
   });
 
+  const dateTitleTr = targetDate ? `${targetDate} Tarihli E-Posta Özetleri` : (dateScope === 'TODAY' ? 'Bugün Gelen E-Posta Özetleri' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri'));
+  const dateTitleEn = targetDate ? `Email Summaries for ${targetDate}` : (dateScope === 'TODAY' ? "Today's Email Summaries" : (dateScope === 'YESTERDAY' ? "Yesterday's Email Summaries" : 'Latest Email Summaries'));
+  const dateTitleIt = targetDate ? `Riepilogo Email del ${targetDate}` : (dateScope === 'TODAY' ? 'Riepilogo Email di Oggi' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti'));
+
   let responseMarkdown = '';
-  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Email ${mailIndex} Summary` : (queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : (dateScope === 'TODAY' ? "Today's Email Summaries" : (dateScope === 'YESTERDAY' ? "Yesterday's Email Summaries" : 'Latest Email Summaries')))} (${mailEntries.length})\n\n`;
-  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Riepilogo Email ${mailIndex}` : (queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : (dateScope === 'TODAY' ? 'Riepilogo Email di Oggi' : (dateScope === 'YESTERDAY' ? 'Riepilogo Email di Ieri' : 'Riepilogo Email Recenti')))} (${mailEntries.length})\n\n`;
-  else responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `${mailIndex}. E-Posta Özeti` : (queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : (dateScope === 'TODAY' ? 'Bugün Gelen E-Posta Özetleri' : (dateScope === 'YESTERDAY' ? 'Dün Gelen E-Posta Özetleri' : 'Son Gelen E-Posta Özetleri')))} (${mailEntries.length})\n\n`;
+  if (lang === 'en') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Email ${mailIndex} Summary` : (queryMode === 'MAIL_ARCHIVE' ? 'Stored Email Archive' : dateTitleEn)} (${mailEntries.length})\n\n`;
+  else if (lang === 'it') responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `Riepilogo Email ${mailIndex}` : (queryMode === 'MAIL_ARCHIVE' ? 'Archivio Email Memorizzate' : dateTitleIt)} (${mailEntries.length})\n\n`;
+  else responseMarkdown += `### ${queryMode === 'MAIL_INDEX' ? `${mailIndex}. E-Posta Özeti` : (queryMode === 'MAIL_ARCHIVE' ? 'Kalıcı E-Posta Arşivi' : dateTitleTr)} (${mailEntries.length})\n\n`;
 
   for (const entry of mailEntries) {
     const { doc, index, fullContent, dateStr } = entry;
     const displayIndex = queryMode === 'MAIL_INDEX' ? mailIndex : index + 1;
-    const body = (summarizeOnly || mailEntries.length > 1) ? summarizeMailContent(fullContent, lang) : fullContent;
+    const body = (summarizeOnly || mailEntries.length > 1) ? await summarizeMailContentWithLlm(fullContent, lang) : fullContent;
     if (lang === 'en') {
       responseMarkdown += `#### ${displayIndex}. ${doc.title || 'Untitled'}\n- **Sender:** \`${doc.sender || 'Unknown'}\`\n- **Received:** ${dateStr}\n- **Project:** ${doc.project_name || doc.project_code || 'General Project'}\n\n${body}\n\n`;
     } else if (lang === 'it') {
@@ -349,15 +401,17 @@ async function answerProjectMailQuery(params) {
   const projectCode = projectInfo.code;
   const projectName = projectInfo.name;
 
-  if (queryMode === 'LATEST_MAIL' || queryMode === 'MAIL_BY_SENDER' || queryMode === 'MAIL_ARCHIVE' || queryMode === 'MAIL_INDEX') {
+  if (queryMode === 'LATEST_MAIL' || queryMode === 'MAIL_BY_SENDER' || queryMode === 'MAIL_ARCHIVE' || queryMode === 'MAIL_INDEX' || queryMode === 'SPECIFIC_DATE') {
     return answerLatestMailDirect({
       request_id: requestId,
       session_id: sessionId,
+      question: question,
       project_code: projectCode,
       sender: params.sender,
       mail_count: params.mail_count,
       mail_index: params.mail_index,
       date_scope: params.date_scope,
+      target_date: params.target_date,
       query_mode: queryMode,
       summarize_only: summarizeRequested,
       response_language: lang

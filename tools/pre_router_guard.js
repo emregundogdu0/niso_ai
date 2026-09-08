@@ -3,7 +3,7 @@
  * First-Class Support for Turkish (tr), English (en), and Italian (it).
  */
 
-const { normalizeText } = require('./date_normalizer');
+const { normalizeText, parseMultilingualDateRange } = require('./date_normalizer');
 
 // Fast deterministic language detector based on distinctive character n-grams and vocabulary
 function detectLanguageDeterministic(text) {
@@ -398,18 +398,29 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     'tum mailler', 'tum epostalar', 'previously read', 'email archive', 'old emails',
     'email gia lette', 'archivio email', 'vecchie email'
   ].some(p => norm.includes(p));
-  const wantsMailContent = ['oku', 'ozet', 'icerik', 'ne yaziyor', 'neyle alakali', 'neden bahsediyor'].some(p => norm.includes(p));
+  const wantsMailContent = [
+    'oku', 'ozet', 'icerik', 'ne yaziyor', 'neyle alakali', 'neden bahsediyor',
+    'nedir', 'nelerdir', 'neler', 'ne', 'hangisi', 'hangileri', 'detay', 'goster', 'bak'
+  ].some(p => norm.includes(p));
   const hasMailArrivalCue = [
     'geldi mi', 'gelen var mi', 'mail var mi', 'eposta var mi', 'e posta var mi',
-    'mail geldi', 'eposta geldi', 'e posta geldi',
+    'mail geldi', 'eposta geldi', 'e posta geldi', 'gelen mail', 'gelen eposta', 'gelen mailler',
     'did any email arrive', 'any email today', 'was there an email',
     'email arrivata', 'ci sono email', 'e arrivata una email'
   ].some(p => norm.includes(p));
   const hasNamedProject = ['temsa', 'vortex', 'eldor obc', 'obc', 'smart factory'].some(p => norm.includes(p));
+  const dateInfo = parseMultilingualDateRange(raw, lang);
+  const hasSpecificDate = !!dateInfo.dateFrom;
+  const isSpecificDatedMail = hasMailReference && hasSpecificDate;
+  const isGeneralMailQuery = hasMailReference && (
+    wantsMailContent || norm.includes('gonderilen') || norm.includes('gelen') || norm.includes('yazilan') ||
+    norm.includes('tarih') || norm.includes('kimden') || norm.includes('kime')
+  );
+
   const isLatestMail = latestMailPhrases.some(p => norm.includes(p)) ||
     (hasMailReference && hasLatestCue) ||
     (hasMailReference && wantsMailContent && hasNamedProject);
-  const isDatedMail = hasMailReference && (hasYesterdayCue || hasTodayCue) && (wantsMailContent || hasMailArrivalCue);
+  const isDatedMail = hasMailReference && (hasYesterdayCue || hasTodayCue || hasSpecificDate);
   const isArrivalMailCheck = hasMailReference && hasMailArrivalCue;
   const isArchiveMail = hasMailReference && hasArchiveCue;
 
@@ -449,7 +460,8 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
         sender: null,
         mail_index: Math.min(20, Math.max(1, requestedMailIndex)),
         mail_count: 1,
-        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : null),
+        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : (dateInfo.dateFrom || null)),
+        target_date: dateInfo.dateFrom || null,
         response_language: lang
       },
       original_question: raw,
@@ -457,7 +469,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     };
   }
 
-  if (isLatestMail || isDatedMail || isArchiveMail || isArrivalMailCheck) {
+  if (isLatestMail || isDatedMail || isArchiveMail || isArrivalMailCheck || isSpecificDatedMail || isGeneralMailQuery) {
     return {
       is_deterministic: true,
       detected_language: lang,
@@ -467,11 +479,12 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
       intent_confidence: 0.98,
       route_used: 'PROJECT_MAIL',
       entities: {
-        query_mode: isArchiveMail ? 'MAIL_ARCHIVE' : 'LATEST_MAIL',
+        query_mode: isArchiveMail ? 'MAIL_ARCHIVE' : (hasSpecificDate ? 'SPECIFIC_DATE' : 'LATEST_MAIL'),
         project_code: extractedProjectCode,
         sender: null,
-        mail_count: requestedMailCount,
-        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : null),
+        mail_count: hasSpecificDate ? Math.max(5, requestedMailCount) : requestedMailCount,
+        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : (dateInfo.dateFrom || null)),
+        target_date: dateInfo.dateFrom || null,
         response_language: lang
       },
       original_question: raw,
@@ -487,12 +500,13 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   ];
   const hasProject = projectKeywords.some(k => norm.includes(k));
 
-  // 7B. Company profile and ownership questions
+  // 7B. Company profile, technology and hardware questions
   const companyNames = ['niso', 'eldor'];
   const companyQuestionKeywords = [
     'sahibi', 'kurucu', 'kim kurdu', 'ne is yapar', 'faaliyet alani', 'faaliyet alanlari',
     'genel merkez', 'fabrika adresi', 'nerede', 'urun', 'urunleri', 'teknoloji', 'teknolojileri',
-    'teknolojilerle', 'ilgileniyor', 'sirket profili'
+    'teknolojilerle', 'ilgileniyor', 'sirket profili', 'otonom', 'donanim', 'mimari', 'kontrol',
+    'slam', 'radar', 'lidar', 'arac', 'ugv', 'jetson', 'autosar', 'iso 26262', 'vortex', 'stack'
   ];
   const hasCompanyKnowledge = companyNames.some(k => norm.includes(k)) &&
     companyQuestionKeywords.some(k => norm.includes(k));
@@ -536,12 +550,20 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
     // TR
     'gec kaldi', 'geciken', 'gec kalan', 'gec geldi', 'gec gelen', 'gec gelenler',
     'kimler gec geldi', 'mesaide', 'ise geldi', 'zamaninda gelen', 'puantaj',
+    'kacta geldi', 'saat kacta', 'giris saati', 'cikis saati', 'kacta cikti', 'geldi mi',
+    'turnike', 'devam durumu', 'devamsizlik', 'giris yapti', 'cikis yapti',
+    'gec kalma', 'gec kalma sureleri', 'gec kalma suresi', 'gecikme suresi', 'gecikme sureleri',
+    'ortalama gec kalma', 'ortalama gecikme', 'gecikme zamanlari', 'gec kalma zamanlari',
     // EN
     'arrived late', 'who arrived late', 'who is late', 'was on time', 'who was on time', 'attendance', 'late today',
+    'what time did', 'arrival time', 'clock in', 'clock out', 'average late', 'average lateness', 'average delay',
     // IT
-    'arrivato in ritardo', 'chi e arrivato in ritardo', 'chi e in ritardo', 'era puntuale', 'presenze', 'in ritardo oggi'
+    'arrivato in ritardo', 'chi e arrivato in ritardo', 'chi e in ritardo', 'era puntuale', 'presenze', 'in ritardo oggi',
+    'a che ora e arrivato', 'orario di ingresso', 'ritardo medio', 'media ritardo'
   ];
-  const hasAttendance = attendanceKeywords.some(k => norm.includes(k));
+  const hasEmpCode = /\bemp[-_]?\d+\b/i.test(raw);
+  const hasAttendance = attendanceKeywords.some(k => norm.includes(k)) || 
+    (hasEmpCode && (norm.includes('geldi') || norm.includes('saat') || norm.includes('durum') || norm.includes('giris') || norm.includes('ortalama') || norm.includes('gec') || norm.includes('dakika')));
 
   // 9. HR Policy in TR, EN, IT
   const hrKeywords = [

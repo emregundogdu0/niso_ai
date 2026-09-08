@@ -180,7 +180,7 @@ function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
   }
 
   // 9. Relative terms: This Month / Bu Ay / Questo Mese
-  if (qNorm.includes('bu ay') || qNorm.includes('this month') || qNorm.includes('questo mese') || qNorm.includes('eylul ayi') || qNorm.includes('september')) {
+  if (qNorm.includes('bu ay') || qNorm.includes('this month') || qNorm.includes('questo mese')) {
     const year = today.getUTCFullYear();
     const month = today.getUTCMonth();
     dateFrom = formatDateIso(new Date(Date.UTC(year, month, 1, 12, 0, 0)));
@@ -191,7 +191,7 @@ function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
   }
 
   // 10. Relative terms: Last Month / Geçen Ay / Mese Scorso
-  if (qNorm.includes('gecen ay') || qNorm.includes('last month') || qNorm.includes('mese scorso') || qNorm.includes('agustos ayi') || qNorm.includes('august')) {
+  if (qNorm.includes('gecen ay') || qNorm.includes('last month') || qNorm.includes('mese scorso')) {
     const year = today.getUTCFullYear();
     const month = today.getUTCMonth();
     dateFrom = formatDateIso(new Date(Date.UTC(year, month - 1, 1, 12, 0, 0)));
@@ -199,6 +199,37 @@ function parseMultilingualDateRange(rawQuestion, lang = 'tr') {
     dateDesc = lang === 'en' ? `Last Month (${dateFrom} - ${dateTo})` : (lang === 'it' ? `Mese Scorso (${dateFrom} - ${dateTo})` : `Geçen Ay (${dateFrom} - ${dateTo})`);
     sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
     return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
+  }
+
+  // 11. Whole Named Month Query (e.g. "mart ayında", "ocak", "haziran ayı", "september", "in march")
+  for (const [mName, mCode] of Object.entries(MONTHS)) {
+    const wholeMonthRegex = new RegExp(`\\b${mName}(?:\\s+ayi|\\s+ayinda|\\s+ayindaki)?\\b`, 'i');
+    if (wholeMonthRegex.test(qNorm)) {
+      const targetYear = today.getUTCFullYear();
+      const monthIdx = parseInt(mCode, 10) - 1;
+      dateFrom = formatDateIso(new Date(Date.UTC(targetYear, monthIdx, 1, 12, 0, 0)));
+      dateTo = formatDateIso(new Date(Date.UTC(targetYear, monthIdx + 1, 0, 12, 0, 0)));
+      const capMonth = mName.charAt(0).toUpperCase() + mName.slice(1);
+      dateDesc = `${capMonth} ${targetYear} (${dateFrom} - ${dateTo})`;
+      sqlClause = `day BETWEEN '${dateFrom}' AND '${dateTo}'`;
+      return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification, clarificationQuestion };
+    }
+  }
+
+  // 12. All-Time / Overall / Average queries without a specific date (e.g. "ortalama geç kalma", "genel ortalama", "average late")
+  if (
+    qNorm.includes('ortalama') ||
+    qNorm.includes('average') ||
+    qNorm.includes('media') ||
+    qNorm.includes('genel') ||
+    qNorm.includes('all time') ||
+    qNorm.includes('overall')
+  ) {
+    dateFrom = '2026-01-01';
+    dateTo = formatDateIso(today);
+    dateDesc = lang === 'en' ? 'All Records (Overall Average)' : (lang === 'it' ? 'Tutti i Record (Media Generale)' : 'Tüm Kayıtlar (Genel Ortalama)');
+    sqlClause = '1=1';
+    return { dateFrom, dateTo, dateDesc, sqlClause, requiresClarification: false, clarificationQuestion: null };
   }
 
   // Default: Today
