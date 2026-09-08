@@ -35,6 +35,15 @@
           </svg>
           <span class="nav-label" id="txtNavNewChat">Yeni sohbet</span>
         </button>
+        <button class="nav-btn" id="attendanceNavBtn" aria-label="Çalışan Giriş Saatleri & Puantaj" title="Puantaj & Giriş Saatleri">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+          <span class="nav-label" id="txtNavAttendance">Giriş saatleri</span>
+        </button>
         <button class="nav-btn" id="historyBtn" aria-label="Sohbet Geçmişi" title="Sohbet Geçmişi">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"></circle>
@@ -199,6 +208,167 @@
           </button>
         </form>
       </div>
+
+      <!-- Component: Attendance & Turnstile Management View -->
+      <section class="attendance-viewport" id="attendanceViewport" style="display: none;">
+        <div class="attendance-container">
+          <!-- Header Bar -->
+          <div class="attendance-header">
+            <div class="attendance-header-info">
+              <h2 class="attendance-title">Çalışan Giriş-Çıkış ve Puantaj Yönetimi</h2>
+              <p class="attendance-subtitle">Personel giriş ve çıkış saatlerini girin, doğrudan veritabanına işleyin. Asistan tüm soruları bu verilere göre yanıtlar.</p>
+            </div>
+            <div class="attendance-header-controls">
+              <label for="attendanceDatePicker" class="date-picker-label">Puantaj Tarihi:</label>
+              <input type="date" id="attendanceDatePicker" class="attendance-date-input" value="2026-09-08" />
+              <button type="button" class="btn-secondary" id="btnTodayAttendance">Bugün</button>
+              <button type="button" class="btn-primary" id="btnRefreshAttendance" title="Yenile">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Yenile
+              </button>
+            </div>
+          </div>
+
+          <!-- Stats Overview Cards -->
+          <div class="attendance-stats-grid">
+            <div class="att-stat-card">
+              <span class="att-stat-label">Toplam Kayıt</span>
+              <span class="att-stat-value" id="statTotal">-</span>
+            </div>
+            <div class="att-stat-card stat-on-time">
+              <span class="att-stat-label">Zamanında</span>
+              <span class="att-stat-value" id="statOnTime">-</span>
+            </div>
+            <div class="att-stat-card stat-late">
+              <span class="att-stat-label">Geç Kalanlar</span>
+              <span class="att-stat-value" id="statLate">-</span>
+            </div>
+            <div class="att-stat-card stat-leave">
+              <span class="att-stat-label">İzinli / Uzaktan</span>
+              <span class="att-stat-value" id="statLeave">-</span>
+            </div>
+            <div class="att-stat-card stat-absent">
+              <span class="att-stat-label">Gelmeyen / Eksik</span>
+              <span class="att-stat-value" id="statAbsent">-</span>
+            </div>
+          </div>
+
+          <!-- Form + Table Grid Layout -->
+          <div class="attendance-main-layout">
+            <!-- Left Column: Fast Entry Form -->
+            <div class="attendance-form-card">
+              <h3 class="card-heading" id="formHeading">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                Giriş / Çıkış Saati İşle
+              </h3>
+              <form id="attendanceEntryForm" class="att-form">
+                <div class="form-group">
+                  <label for="attEmployeeSelect">Çalışan Seçin *</label>
+                  <select id="attEmployeeSelect" class="form-select" required>
+                    <option value="">-- Çalışan Seçiniz --</option>
+                  </select>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="attShiftDisplay">Vardiya</label>
+                    <input type="text" id="attShiftDisplay" class="form-input" readonly value="Gündüz Standart (08:30 - 17:30)" />
+                  </div>
+                  <div class="form-group">
+                    <label for="attGraceDisplay">Tolerans</label>
+                    <input type="text" id="attGraceDisplay" class="form-input" readonly value="15 dk (08:45'e kadar)" />
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="attFirstIn">Giriş Saati (First In)</label>
+                    <input type="time" id="attFirstIn" class="form-input" step="60" />
+                  </div>
+                  <div class="form-group">
+                    <label for="attLastOut">Çıkış Saati (Last Out)</label>
+                    <input type="time" id="attLastOut" class="form-input" step="60" />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="attStatusSelect">Durum</label>
+                  <select id="attStatusSelect" class="form-select">
+                    <option value="AUTO">Otomatik Hesapla (Giriş saatine göre)</option>
+                    <option value="ON_TIME">Zamanında (ON_TIME)</option>
+                    <option value="LATE">Geç Kaldı (LATE)</option>
+                    <option value="ON_LEAVE">İzinli (ON_LEAVE)</option>
+                    <option value="REMOTE">Uzaktan Çalışma (REMOTE)</option>
+                    <option value="ABSENT">Gelmedi (ABSENT)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="attNote">Açıklama / Not (Opsiyonel)</label>
+                  <input type="text" id="attNote" class="form-input" placeholder="Örn. Müşteri ziyareti, yıllık izin..." />
+                </div>
+
+                <div class="form-actions">
+                  <button type="submit" class="btn-primary btn-block" id="btnSaveAttendance">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                    Veritabanına Kaydet
+                  </button>
+                  <button type="button" class="btn-secondary" id="btnResetForm">Formu Temizle</button>
+                </div>
+                <div class="form-feedback" id="formFeedback" style="display: none;"></div>
+              </form>
+            </div>
+
+            <!-- Right Column: Live Table & Filters -->
+            <div class="attendance-table-card">
+              <div class="table-header-filters">
+                <div class="search-box">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                  <input type="text" id="attSearchInput" placeholder="Personel veya sicil ara..." class="search-input" />
+                </div>
+                <div class="filter-group">
+                  <select id="attDeptFilter" class="filter-select">
+                    <option value="">Tüm Departmanlar</option>
+                    <option value="Yazılım">Yazılım</option>
+                    <option value="İnsan Kaynakları">İnsan Kaynakları</option>
+                    <option value="Üretim & Fabrika">Üretim & Fabrika</option>
+                    <option value="Finans">Finans</option>
+                    <option value="Satış & Pazarlama">Satış & Pazarlama</option>
+                  </select>
+                  <select id="attStatusFilter" class="filter-select">
+                    <option value="">Tüm Durumlar</option>
+                    <option value="LATE">Sadece Geç Kalanlar</option>
+                    <option value="ON_TIME">Zamanında Gelenler</option>
+                    <option value="ON_LEAVE">İzinliler</option>
+                    <option value="REMOTE">Uzaktan Çalışanlar</option>
+                    <option value="ABSENT">Gelmeyenler</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="table-wrapper">
+                <table class="att-table" id="attendanceTable">
+                  <thead>
+                    <tr>
+                      <th>Sicil</th>
+                      <th>Ad Soyad</th>
+                      <th>Departman</th>
+                      <th>Giriş</th>
+                      <th>Çıkış</th>
+                      <th>Geç Kalma</th>
+                      <th>Durum</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody id="attendanceTableBody">
+                    <tr><td colspan="8" class="text-center">Yükleniyor...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- Footer Note -->
       <footer class="app-footer-note">
