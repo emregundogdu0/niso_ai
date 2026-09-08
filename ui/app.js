@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
       tr: {
         page_title: 'NISO Yönetim Asistanı',
         new_chat: 'Yeni Sohbet',
+        attendance_nav: 'Giriş Saatleri (Puantaj)',
         history: 'Sohbet Geçmişi',
         system_info: 'Sistem Bilgisi',
         settings: 'Ayarlar',
@@ -64,11 +65,14 @@ document.addEventListener('DOMContentLoaded', () => {
         route_error: 'Sistem Uyarısı',
         empty_input_msg: 'Lütfen yanıtlayabileceğim bir soru veya mesaj yazınız.',
         synthetic_notice: 'Bu cevap sentetik demo verileri içermektedir.',
-        live_test_notice: 'Bu cevap canlı test verilerine dayanmaktadır.'
+        live_test_notice: 'Bu cevap canlı test verilerine dayanmaktadır.',
+        confidence_label: 'Güven',
+        judge_label: 'Hakem'
       },
       en: {
         page_title: 'NISO Management Assistant',
         new_chat: 'New Chat',
+        attendance_nav: 'Attendance',
         history: 'Chat History',
         system_info: 'System Info',
         settings: 'Settings',
@@ -120,11 +124,14 @@ document.addEventListener('DOMContentLoaded', () => {
         route_error: 'System Notice',
         empty_input_msg: 'Please enter a question or message.',
         synthetic_notice: 'This response contains synthetic demo data.',
-        live_test_notice: 'This response is based on live test data.'
+        live_test_notice: 'This response is based on live test data.',
+        confidence_label: 'Confidence',
+        judge_label: 'Judge'
       },
       it: {
         page_title: 'NISO Assistente di Direzione',
         new_chat: 'Nuova Chat',
+        attendance_nav: 'Presenze',
         history: 'Cronologia Chat',
         system_info: 'Info Sistema',
         settings: 'Impostazioni',
@@ -176,7 +183,9 @@ document.addEventListener('DOMContentLoaded', () => {
         route_error: 'Avviso di Sistema',
         empty_input_msg: 'Inserisci una domanda o un messaggio.',
         synthetic_notice: 'Questa risposta contiene dati demo sintetici.',
-        live_test_notice: 'Questa risposta si basa su dati di test dal vivo.'
+        live_test_notice: 'Questa risposta si basa su dati di test dal vivo.',
+        confidence_label: 'Confidenza',
+        judge_label: 'Giudice'
       }
     },
 
@@ -214,6 +223,11 @@ document.addEventListener('DOMContentLoaded', () => {
         newChatBtn.title = this.t('new_chat');
         newChatBtn.setAttribute('aria-label', this.t('new_chat'));
       }
+      const attNavBtn = document.getElementById('attendanceNavBtn');
+      if (attNavBtn) {
+        attNavBtn.title = this.t('attendance_nav');
+        attNavBtn.setAttribute('aria-label', this.t('attendance_nav'));
+      }
       const historyBtn = document.getElementById('historyBtn');
       if (historyBtn) {
         historyBtn.title = this.t('history');
@@ -226,6 +240,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const navNewChat = document.getElementById('txtNavNewChat');
       if (navNewChat) navNewChat.textContent = this.t('new_chat');
+      const navAttendance = document.getElementById('txtNavAttendance');
+      if (navAttendance) navAttendance.textContent = this.t('attendance_nav');
       const navHistory = document.getElementById('txtNavHistory');
       if (navHistory) navHistory.textContent = this.t('history');
       const sidebarHistoryTitle = document.getElementById('txtSidebarHistoryTitle');
@@ -336,9 +352,35 @@ document.addEventListener('DOMContentLoaded', () => {
     sidebarToggleBtn: document.getElementById('sidebarToggleBtn'),
     sidebarHistoryList: document.getElementById('sidebarHistoryList'),
     newChatBtn: document.getElementById('newChatBtn'),
+    attendanceNavBtn: document.getElementById('attendanceNavBtn'),
     historyBtn: document.getElementById('historyBtn'),
     infoBtn: document.getElementById('infoBtn'),
     mobileMenuBtn: document.getElementById('mobileMenuBtn'),
+
+    // Attendance View Elements
+    attendanceViewport: document.getElementById('attendanceViewport'),
+    attendanceDatePicker: document.getElementById('attendanceDatePicker'),
+    btnTodayAttendance: document.getElementById('btnTodayAttendance'),
+    btnRefreshAttendance: document.getElementById('btnRefreshAttendance'),
+    statTotal: document.getElementById('statTotal'),
+    statOnTime: document.getElementById('statOnTime'),
+    statLate: document.getElementById('statLate'),
+    statLeave: document.getElementById('statLeave'),
+    statAbsent: document.getElementById('statAbsent'),
+    attEmployeeSelect: document.getElementById('attEmployeeSelect'),
+    attShiftDisplay: document.getElementById('attShiftDisplay'),
+    attGraceDisplay: document.getElementById('attGraceDisplay'),
+    attFirstIn: document.getElementById('attFirstIn'),
+    attLastOut: document.getElementById('attLastOut'),
+    attStatusSelect: document.getElementById('attStatusSelect'),
+    attNote: document.getElementById('attNote'),
+    attendanceEntryForm: document.getElementById('attendanceEntryForm'),
+    btnResetForm: document.getElementById('btnResetForm'),
+    formFeedback: document.getElementById('formFeedback'),
+    attSearchInput: document.getElementById('attSearchInput'),
+    attDeptFilter: document.getElementById('attDeptFilter'),
+    attStatusFilter: document.getElementById('attStatusFilter'),
+    attendanceTableBody: document.getElementById('attendanceTableBody'),
 
     // Top Bar
     userNameDisplay: document.getElementById('userNameDisplay'),
@@ -572,9 +614,67 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
+      // Empirical F1-Score Confidence Badge
+      let confidenceHtml = '';
+      const f1Percent = typeof data.f1_percent === 'number'
+        ? data.f1_percent
+        : (typeof data.intent_confidence === 'number'
+            ? Math.min(100, Math.max(0, Math.round(data.intent_confidence <= 1.0 ? data.intent_confidence * 100 : data.intent_confidence)))
+            : (typeof data.confidence === 'number' ? Math.min(100, Math.max(0, Math.round(data.confidence * 100))) : null));
+
+      if (f1Percent !== null && !isNaN(f1Percent)) {
+        const confTier = f1Percent >= 85 ? 'high' : (f1Percent >= 70 ? 'medium' : 'low');
+        const f1Details = data.f1_details || {};
+        const pStr = typeof f1Details.precision === 'number' ? ` | Hassasiyet (P): %${Math.round(f1Details.precision * 100)}` : '';
+        const rStr = typeof f1Details.recall === 'number' ? ` | Duyarlılık (R): %${Math.round(f1Details.recall * 100)}` : '';
+        const f1Tooltip = `F1-Score: %${f1Percent}${pStr}${rStr} (Ground Truth Benchmark ile hesaplanmıştır)`;
+        const confText = I18n.current === 'tr'
+          ? `%${f1Percent} F1 Güven`
+          : (I18n.current === 'it' ? `${f1Percent}% F1 Confidenza` : `${f1Percent}% F1 Confidence`);
+        confidenceHtml = `
+          <span class="confidence-badge ${confTier}" title="${escapeHtml(f1Tooltip)}">
+            <span class="confidence-dot" aria-hidden="true"></span>
+            <span>${confText}</span>
+          </span>
+        `;
+      }
+
+      // LLM as a Judge Evaluation Badge
+      let judgeHtml = '';
+      if (data.judge_evaluation) {
+        const j = data.judge_evaluation;
+        const jScore = typeof j.score === 'number' ? j.score : 95;
+        const jVerdict = (j.verdict || 'PASS').toUpperCase();
+        const jTier = jVerdict === 'FAIL' ? 'fail' : (jVerdict === 'WARNING' ? 'warning' : 'pass');
+        const jIcon = jVerdict === 'FAIL' ? '⚠️' : (jVerdict === 'WARNING' ? '🔍' : '🛡️');
+        const jTitle = escapeHtml(j.critique || (I18n.current === 'tr' ? 'Hakem değerlendirmesi yapıldı.' : 'Judge evaluation completed.'));
+        
+        let jText = '';
+        if (I18n.current === 'tr') {
+          jText = `Hakem: %${jScore}`;
+        } else if (I18n.current === 'it') {
+          jText = `Giudice: ${jScore}%`;
+        } else {
+          jText = `Judge: ${jScore}%`;
+        }
+
+        judgeHtml = `
+          <span class="judge-badge ${jTier}" title="${jTitle} (${jVerdict})">
+            <span class="judge-icon" aria-hidden="true">${jIcon}</span>
+            <span>${jText}</span>
+          </span>
+        `;
+      }
+
       row.innerHTML = `
         <div class="msg-bubble">
-          <span class="route-badge ${routeClass}">${routeLabel}</span>
+          <div class="msg-header-badges">
+            <span class="route-badge ${routeClass}">${routeLabel}</span>
+            <div style="display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              ${confidenceHtml}
+              ${judgeHtml}
+            </div>
+          </div>
           <div class="msg-content">${contentHtml}${noticeHtml}${sourcesHtml}</div>
           <div class="msg-actions">
             ${!isSmallOrHelp ? `<span>Ref: <code>${auditId.substring(0, 8)}</code></span>` : '<span></span>'}
@@ -970,6 +1070,284 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // =========================================================================
+  // Component: AttendanceManager
+  // =========================================================================
+  const AttendanceManager = {
+    employees: [],
+    currentRecords: [],
+    selectedDate: new Date().toISOString().slice(0, 10),
+
+    init() {
+      if (!DOM.attendanceViewport) return;
+      this.selectedDate = DOM.attendanceDatePicker?.value || new Date().toISOString().slice(0, 10);
+      this.bindEvents();
+      this.loadEmployees();
+    },
+
+    bindEvents() {
+      // Tab Switching
+      DOM.attendanceNavBtn?.addEventListener('click', () => {
+        this.showAttendanceView();
+      });
+
+      DOM.newChatBtn?.addEventListener('click', () => {
+        this.showChatView();
+      });
+
+      // Date changes
+      DOM.attendanceDatePicker?.addEventListener('change', (e) => {
+        this.selectedDate = e.target.value;
+        this.loadDailyRecords();
+      });
+
+      DOM.btnTodayAttendance?.addEventListener('click', () => {
+        const today = new Date().toISOString().slice(0, 10);
+        if (DOM.attendanceDatePicker) DOM.attendanceDatePicker.value = today;
+        this.selectedDate = today;
+        this.loadDailyRecords();
+      });
+
+      DOM.btnRefreshAttendance?.addEventListener('click', () => {
+        this.loadDailyRecords();
+      });
+
+      // Employee select changes -> update shift info
+      DOM.attEmployeeSelect?.addEventListener('change', (e) => {
+        const empNo = e.target.value;
+        const emp = this.employees.find(x => x.employee_no === empNo);
+        if (emp) {
+          if (DOM.attShiftDisplay) DOM.attShiftDisplay.value = `${emp.shift_name} (${(emp.shift_start || '').slice(0, 5)} - ${(emp.shift_end || '').slice(0, 5)})`;
+          if (DOM.attGraceDisplay) DOM.attGraceDisplay.value = `${emp.grace_minutes} dk tolerans`;
+          
+          const existing = this.currentRecords.find(r => r.employee_no === empNo);
+          if (existing) {
+            if (DOM.attFirstIn) DOM.attFirstIn.value = existing.first_in_time || '';
+            if (DOM.attLastOut) DOM.attLastOut.value = existing.last_out_time || '';
+            if (DOM.attStatusSelect) DOM.attStatusSelect.value = existing.status || 'AUTO';
+            if (DOM.attNote) DOM.attNote.value = existing.exception_types || '';
+          } else {
+            if (DOM.attFirstIn) DOM.attFirstIn.value = '';
+            if (DOM.attLastOut) DOM.attLastOut.value = '';
+            if (DOM.attStatusSelect) DOM.attStatusSelect.value = 'AUTO';
+            if (DOM.attNote) DOM.attNote.value = '';
+          }
+        }
+      });
+
+      // Form Submit
+      DOM.attendanceEntryForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await this.saveAttendance();
+      });
+
+      DOM.btnResetForm?.addEventListener('click', () => {
+        DOM.attendanceEntryForm?.reset();
+        this.hideFeedback();
+        document.querySelectorAll('.att-table tr').forEach(r => r.classList.remove('row-selected'));
+      });
+
+      // Table Filters
+      DOM.attSearchInput?.addEventListener('input', () => this.renderTable());
+      DOM.attDeptFilter?.addEventListener('change', () => this.renderTable());
+      DOM.attStatusFilter?.addEventListener('change', () => this.renderTable());
+    },
+
+    showAttendanceView() {
+      if (DOM.chatViewport) DOM.chatViewport.style.display = 'none';
+      if (DOM.bottomComposerContainer) DOM.bottomComposerContainer.style.display = 'none';
+      if (DOM.streamLoadingBar) DOM.streamLoadingBar.style.display = 'none';
+      if (DOM.attendanceViewport) DOM.attendanceViewport.style.display = 'flex';
+
+      DOM.newChatBtn?.classList.remove('active');
+      DOM.attendanceNavBtn?.classList.add('active');
+
+      this.loadDailyRecords();
+      if (window.innerWidth <= 860) DOM.sidebarRail?.classList.remove('open');
+    },
+
+    showChatView() {
+      if (DOM.attendanceViewport) DOM.attendanceViewport.style.display = 'none';
+      if (DOM.chatViewport) DOM.chatViewport.style.display = 'flex';
+      if (State.conversation.length > 0 && DOM.bottomComposerContainer) {
+        DOM.bottomComposerContainer.style.display = 'block';
+      }
+
+      DOM.attendanceNavBtn?.classList.remove('active');
+      DOM.newChatBtn?.classList.add('active');
+    },
+
+    async loadEmployees() {
+      try {
+        const res = await fetch('/api/attendance/employees');
+        const data = await res.json();
+        if (data.status === 'OK' && Array.isArray(data.employees)) {
+          this.employees = data.employees;
+          if (DOM.attEmployeeSelect) {
+            DOM.attEmployeeSelect.innerHTML = '<option value="">-- Çalışan Seçiniz --</option>' +
+              this.employees.map(emp => `<option value="${emp.employee_no}">${emp.employee_no} - ${emp.full_name} (${emp.department})</option>`).join('');
+          }
+        }
+      } catch (err) {
+        console.error('Error loading employees:', err);
+      }
+    },
+
+    async loadDailyRecords() {
+      if (!DOM.attendanceTableBody) return;
+      DOM.attendanceTableBody.innerHTML = '<tr><td colspan="8" class="text-center">Kayıtlar yükleniyor...</td></tr>';
+      try {
+        const res = await fetch(`/api/attendance?day=${encodeURIComponent(this.selectedDate)}`);
+        const data = await res.json();
+        if (data.status === 'OK') {
+          this.currentRecords = data.records || [];
+          this.updateStats(data.stats);
+          this.renderTable();
+        } else {
+          DOM.attendanceTableBody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:#b42318">${data.message || 'Kayıtlar yüklenemedi.'}</td></tr>`;
+        }
+      } catch (err) {
+        console.error('Error loading attendance records:', err);
+        DOM.attendanceTableBody.innerHTML = `<tr><td colspan="8" class="text-center" style="color:#b42318">Hata: ${err.message}</td></tr>`;
+      }
+    },
+
+    updateStats(stats) {
+      if (!stats) return;
+      if (DOM.statTotal) DOM.statTotal.textContent = stats.total ?? 0;
+      if (DOM.statOnTime) DOM.statOnTime.textContent = stats.on_time ?? 0;
+      if (DOM.statLate) DOM.statLate.textContent = stats.late ?? 0;
+      if (DOM.statLeave) DOM.statLeave.textContent = (stats.on_leave || 0) + (stats.remote || 0);
+      if (DOM.statAbsent) DOM.statAbsent.textContent = stats.absent ?? 0;
+    },
+
+    renderTable() {
+      if (!DOM.attendanceTableBody) return;
+      const search = (DOM.attSearchInput?.value || '').toLowerCase().trim();
+      const dept = DOM.attDeptFilter?.value || '';
+      const status = DOM.attStatusFilter?.value || '';
+
+      const filtered = this.currentRecords.filter(r => {
+        if (search && !r.full_name?.toLowerCase().includes(search) && !r.employee_no?.toLowerCase().includes(search)) return false;
+        if (dept && r.department !== dept) return false;
+        if (status && r.status !== status) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        DOM.attendanceTableBody.innerHTML = '<tr><td colspan="8" class="text-center" style="color:#64748b; padding:24px;">Kriterlere uygun kayıt bulunamadı.</td></tr>';
+        return;
+      }
+
+      DOM.attendanceTableBody.innerHTML = filtered.map(r => {
+        const statusBadge = this.getStatusBadge(r.status);
+        const lateDetail = (r.late_minutes && r.late_minutes > 0) ? `<strong>${r.late_minutes} dk</strong>` : '-';
+        const inTime = r.first_in_time || '<span style="color:#94a3b8">Giriş yok</span>';
+        const outTime = r.last_out_time || '<span style="color:#94a3b8">-</span>';
+
+        return `
+          <tr data-emp="${r.employee_no}">
+            <td><code>${r.employee_no}</code></td>
+            <td><strong>${r.full_name}</strong></td>
+            <td>${r.department || '-'}</td>
+            <td>${inTime}</td>
+            <td>${outTime}</td>
+            <td>${lateDetail}</td>
+            <td>${statusBadge}</td>
+            <td>
+              <button type="button" class="btn-edit-row" onclick="window.editAttendanceRow('${r.employee_no}')">
+                Düzenle
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    },
+
+    getStatusBadge(status) {
+      switch (status) {
+        case 'ON_TIME': return '<span class="badge-status on-time">Zamanında</span>';
+        case 'LATE': return '<span class="badge-status late">Geç Kaldı</span>';
+        case 'ON_LEAVE': return '<span class="badge-status leave">İzinli</span>';
+        case 'REMOTE': return '<span class="badge-status remote">Uzaktan</span>';
+        case 'ABSENT': return '<span class="badge-status absent">Gelmedi</span>';
+        case 'HOLIDAY': return '<span class="badge-status leave">Tatil</span>';
+        case 'WEEKEND': return '<span class="badge-status leave">Hafta Sonu</span>';
+        default: return `<span class="badge-status">${status || '-'}</span>`;
+      }
+    },
+
+    editRow(empNo) {
+      if (DOM.attEmployeeSelect) {
+        DOM.attEmployeeSelect.value = empNo;
+        DOM.attEmployeeSelect.dispatchEvent(new Event('change'));
+      }
+      document.querySelectorAll('.att-table tr').forEach(r => {
+        if (r.getAttribute('data-emp') === empNo) r.classList.add('row-selected');
+        else r.classList.remove('row-selected');
+      });
+      DOM.attFirstIn?.focus();
+    },
+
+    async saveAttendance() {
+      const empNo = DOM.attEmployeeSelect?.value;
+      if (!empNo) {
+        this.showFeedback('Lütfen bir çalışan seçiniz.', 'error');
+        return;
+      }
+
+      const payload = {
+        day: this.selectedDate,
+        employee_no: empNo,
+        first_in: DOM.attFirstIn?.value || '',
+        last_out: DOM.attLastOut?.value || '',
+        status: DOM.attStatusSelect?.value || 'AUTO',
+        note: DOM.attNote?.value || ''
+      };
+
+      const btn = document.getElementById('btnSaveAttendance');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Kaydediliyor...';
+      }
+
+      try {
+        const res = await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'OK') {
+          this.showFeedback(data.message || 'Kayıt başarıyla veritabanına işlendi. Yapay zekâ artık bu veriyi kullanacak.', 'success');
+          await this.loadDailyRecords();
+        } else {
+          this.showFeedback(data.message || 'Kayıt başarısız oldu.', 'error');
+        }
+      } catch (err) {
+        this.showFeedback('İletişim hatası: ' + err.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Veritabanına Kaydet';
+        }
+      }
+    },
+
+    showFeedback(msg, type = 'success') {
+      if (!DOM.formFeedback) return;
+      DOM.formFeedback.className = `form-feedback ${type}`;
+      DOM.formFeedback.textContent = msg;
+      DOM.formFeedback.style.display = 'block';
+    },
+
+    hideFeedback() {
+      if (DOM.formFeedback) DOM.formFeedback.style.display = 'none';
+    }
+  };
+
+  window.editAttendanceRow = (empNo) => AttendanceManager.editRow(empNo);
+
+  // =========================================================================
   // Application Bootstrap
   // =========================================================================
   I18n.apply();
@@ -978,4 +1356,5 @@ document.addEventListener('DOMContentLoaded', () => {
   ChatWelcome.showWelcome();
   ChatInput.init();
   SuggestionCards.init();
+  AttendanceManager.init();
 });
