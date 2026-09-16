@@ -27,6 +27,11 @@ ui/voice/*.ogg
 # Generated / local-only artifacts
 test-execution-results.json
 tools/complete_test_results.json
+tools/test_*.js
+GEMINI.md
+TEST_*.md
+benchmark/*.csv
+ui/*.svg
 
 # Dependencies
 node_modules/

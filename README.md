@@ -135,13 +135,12 @@ Varsayılan adres: **http://127.0.0.1:3001**
 ```text
 NISO_AI/
 ├── ui/                      # Web arayüz + HTTP API (server.js, app.js, style.css)
-├── tools/                   # Motorlar: router, HR RAG, SQL, mail, OCR, judge, F1
-├── benchmark/               # Ground-truth F1 benchmark veri seti
+├── tools/                   # Runtime motorlar: router, HR RAG, SQL, mail, OCR, judge, F1
+├── benchmark/               # F1 kalibrasyon veri seti
 ├── n8n_*.json               # n8n workflow export’ları
 ├── hr_policy_dataset_100.jsonl
 ├── start.ps1 / stop.ps1
 ├── VOICE_TTS_SETUP.md
-├── TEST_PLAN_NISO_AI.md
 └── README.md
 ```
 
@@ -190,19 +189,12 @@ n8n UI: http://127.0.0.1:5678
 
 ---
 
-## Test ve kalite
+## Kalite katmanları
 
-- Test planı: [`TEST_PLAN_NISO_AI.md`](TEST_PLAN_NISO_AI.md)
-- Çalıştırma raporu: [`TEST_EXECUTION_REPORT_NISO_AI.md`](TEST_EXECUTION_REPORT_NISO_AI.md)
-- Benchmark: `benchmark/niso_f1_benchmark.json`
-- Router / HR / mail suite’leri: `tools/test_*.js`
-
-Örnek:
-
-```powershell
-node tools/test_router_and_smalltalk_suite.js
-node tools/test_hr_answer_suite.js
-```
+Runtime içinde her sohbet yanıtına şunlar eklenir:
+- Empirik F1 güven skoru (`tools/f1_confidence_calculator.js`, kalibrasyon: `benchmark/niso_f1_benchmark.json`)
+- LLM-as-a-judge değerlendirmesi (`tools/llm_as_a_judge.js`)
+- Audit kaydı (`audit.chat_request`)
 
 ---
 
