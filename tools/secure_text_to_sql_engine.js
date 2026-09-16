@@ -323,7 +323,11 @@ function validateSqlQuery(sql) {
   }
 
   const clean = sql.trim().replace(/;+$/, '');
-  const forbiddenKeywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'COPY'];
+  if (clean.includes(';')) {
+    return { valid: false, reason: 'Multiple SQL statements are not allowed' };
+  }
+
+  const forbiddenKeywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'COPY', 'PG_SLEEP', 'PG_READ_FILE'];
 
   for (const kw of forbiddenKeywords) {
     const reg = new RegExp(`\\b${kw}\\b`, 'i');

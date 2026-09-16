@@ -26,6 +26,10 @@ const PORT = Number(process.env.PORT || DEFAULT_PORT);
 const HOST = process.env.HOST || '127.0.0.1';
 const SHOULD_SCAN_PORTS = !process.env.PORT;
 const PORT_SCAN_LIMIT = Number(process.env.PORT_SCAN_LIMIT || 10);
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '';
+const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2';
+const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_44100_128';
 
 // Session Language Memory
 const sessionLanguageMap = new Map();
@@ -227,6 +231,39 @@ Yanıt:`;
   return 'Yüklenen belgeden edinilen bilgilere göre:\n\n' + context.slice(0, 400) + '...';
 }
 
+function readJsonBody(req, maxBytes = 128 * 1024) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body || '{}'));
+      } catch (err) {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function normalizeTtsText(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/[#>*_~|]/g, ' ')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1800);
+}
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', `*`);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -256,6 +293,7 @@ const server = http.createServer(async (req, res) => {
       '.png': 'image/png',
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
+      '.mp3': 'audio/mpeg',
       '.ico': 'image/x-icon'
     };
     res.writeHead(200, {
@@ -267,6 +305,87 @@ const server = http.createServer(async (req, res) => {
   }
 
   // API Endpoints
+  if (req.method === 'GET' && req.url === '/api/tts/status') {
+    const referencePath = path.join(__dirname, 'voice', 'nazli-reference.mp3');
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      status: 'OK',
+      provider: ELEVENLABS_API_KEY && ELEVENLABS_VOICE_ID ? 'ELEVENLABS' : 'BROWSER_FALLBACK',
+      configured: Boolean(ELEVENLABS_API_KEY && ELEVENLABS_VOICE_ID),
+      model: ELEVENLABS_MODEL_ID,
+      reference_audio: fs.existsSync(referencePath) ? '/voice/nazli-reference.mp3' : null
+    }));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/tts') {
+    try {
+      const payload = await readJsonBody(req);
+      const text = normalizeTtsText(payload.text);
+      const lang = payload.lang || 'tr';
+      const voiceId = payload.voice_id || ELEVENLABS_VOICE_ID;
+
+      if (!text) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ status: 'ERROR', message: 'TTS metni boş olamaz.' }));
+        return;
+      }
+
+      if (!ELEVENLABS_API_KEY || !voiceId) {
+        res.writeHead(501, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          status: 'FALLBACK',
+          message: 'Custom TTS için ELEVENLABS_API_KEY ve ELEVENLABS_VOICE_ID gerekli.'
+        }));
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        },
+        body: JSON.stringify({
+          text,
+          model_id: ELEVENLABS_MODEL_ID,
+          voice_settings: {
+            stability: Number(process.env.ELEVENLABS_STABILITY || 0.5),
+            similarity_boost: Number(process.env.ELEVENLABS_SIMILARITY_BOOST || 0.78),
+            style: Number(process.env.ELEVENLABS_STYLE || 0.12),
+            use_speaker_boost: process.env.ELEVENLABS_SPEAKER_BOOST !== 'false'
+          },
+          language_code: lang === 'tr' ? 'tr' : (lang === 'it' ? 'it' : 'en')
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+
+      if (!ttsRes.ok) {
+        const errText = await ttsRes.text().catch(() => '');
+        res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ status: 'ERROR', message: `TTS sağlayıcısı hata döndürdü: ${ttsRes.status}`, details: errText.slice(0, 300) }));
+        return;
+      }
+
+      const audioBuffer = Buffer.from(await ttsRes.arrayBuffer());
+      res.writeHead(200, {
+        'Content-Type': 'audio/mpeg',
+        'Cache-Control': 'no-store',
+        'X-TTS-Provider': 'ELEVENLABS',
+        'X-TTS-Model': ELEVENLABS_MODEL_ID
+      });
+      res.end(audioBuffer);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
+    }
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/api/attendance/employees') {
     try {
       const employees = runAdminPsqlJson(`

@@ -410,7 +410,20 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   ].some(p => norm.includes(p));
   const hasNamedProject = ['temsa', 'vortex', 'eldor obc', 'obc', 'smart factory'].some(p => norm.includes(p));
   const dateInfo = parseMultilingualDateRange(raw, lang);
-  const hasSpecificDate = !!dateInfo.dateFrom;
+  const hasExplicitDateCue =
+    hasYesterdayCue ||
+    hasTodayCue ||
+    /\b(202\d)-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\b/.test(raw) ||
+    /\b(0?[1-9]|[12][0-9]|3[01])[./-](0?[1-9]|1[0-2])(?:[./-](202\d))?\b/.test(raw) ||
+    [
+      'ocak', 'subat', 'mart', 'nisan', 'mayis', 'haziran', 'temmuz', 'agustos', 'eylul', 'ekim', 'kasim', 'aralik',
+      'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+      'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
+      'bu hafta', 'gecen hafta', 'son 7 gun', 'bu ay', 'gecen ay',
+      'this week', 'last week', 'last 7 days', 'this month', 'last month',
+      'questa settimana', 'settimana scorsa', 'ultimi 7 giorni', 'questo mese', 'mese scorso'
+    ].some(p => norm.includes(p));
+  const hasSpecificDate = !!dateInfo.dateFrom && hasExplicitDateCue;
   const isSpecificDatedMail = hasMailReference && hasSpecificDate;
   const isGeneralMailQuery = hasMailReference && (
     wantsMailContent || norm.includes('gonderilen') || norm.includes('gelen') || norm.includes('yazilan') ||
@@ -446,6 +459,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   else if (norm.includes('smart factory') || norm.includes('fabrika')) extractedProjectCode = 'PRJ-SMART-FACTORY';
 
   if (requestedMailIndex && hasMailReference && wantsMailContent) {
+    const scopedDate = hasSpecificDate ? dateInfo.dateFrom : null;
     return {
       is_deterministic: true,
       detected_language: lang,
@@ -460,8 +474,8 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
         sender: null,
         mail_index: Math.min(20, Math.max(1, requestedMailIndex)),
         mail_count: 1,
-        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : (dateInfo.dateFrom || null)),
-        target_date: dateInfo.dateFrom || null,
+        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : scopedDate),
+        target_date: scopedDate,
         response_language: lang
       },
       original_question: raw,
@@ -470,6 +484,7 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   }
 
   if (isLatestMail || isDatedMail || isArchiveMail || isArrivalMailCheck || isSpecificDatedMail || isGeneralMailQuery) {
+    const scopedDate = hasSpecificDate ? dateInfo.dateFrom : null;
     return {
       is_deterministic: true,
       detected_language: lang,
@@ -483,8 +498,8 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
         project_code: extractedProjectCode,
         sender: null,
         mail_count: hasSpecificDate ? Math.max(5, requestedMailCount) : requestedMailCount,
-        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : (dateInfo.dateFrom || null)),
-        target_date: dateInfo.dateFrom || null,
+        date_scope: hasYesterdayCue ? 'YESTERDAY' : (hasTodayCue ? 'TODAY' : scopedDate),
+        target_date: scopedDate,
         response_language: lang
       },
       original_question: raw,

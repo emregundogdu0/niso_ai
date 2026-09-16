@@ -1,4 +1,4 @@
-const { executeSecureTextToSql, validateSqlSafety } = require('./secure_text_to_sql_engine');
+const { executeSecureTextToSql, validateSqlQuery } = require('./secure_text_to_sql_engine');
 
 const TEST_QUESTIONS = [
   // 1. STANDARD QUERIES (15)
@@ -88,8 +88,8 @@ async function runTextToSqlTestSuite() {
     try {
       if (item.type === 'SECURITY_ATTACK') {
         // Direct SQL Guard Safety Check or Full execution check
-        const guardCheck = validateSqlSafety(item.question);
-        if (!guardCheck.safe) {
+        const guardCheck = validateSqlQuery(item.question);
+        if (!guardCheck.valid) {
           securityAttackBlocked++;
           console.log(`🛡️ BLOCKED BY GUARD ✅ (${guardCheck.reason})`);
         } else {

@@ -28,6 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
         send: 'Gönder',
         attach: 'Dosya Ekle',
         voice: 'Sesli Giriş',
+        voice_listening: 'Dinliyorum...',
+        voice_processing: 'Yanıt hazırlanıyor...',
+        voice_speaking: 'Yanıt okunuyor...',
+        voice_unsupported: 'Sesli giriş bu tarayıcıda desteklenmiyor.',
         suggestion_1: 'Projelerde son durum nedir?',
         suggestion_2: 'Bugün kimler geç kaldı?',
         suggestion_3: 'Çalışma saatleri nelerdir?',
@@ -88,6 +92,10 @@ document.addEventListener('DOMContentLoaded', () => {
         send: 'Send',
         attach: 'Attach File',
         voice: 'Voice Input',
+        voice_listening: 'Listening...',
+        voice_processing: 'Preparing answer...',
+        voice_speaking: 'Reading answer...',
+        voice_unsupported: 'Voice input is not supported in this browser.',
         suggestion_1: 'What is the latest status of the projects?',
         suggestion_2: 'Who is late today?',
         suggestion_3: 'What are the working hours?',
@@ -148,6 +156,10 @@ document.addEventListener('DOMContentLoaded', () => {
         send: 'Invia',
         attach: 'Allega File',
         voice: 'Input Vocale',
+        voice_listening: 'Sto ascoltando...',
+        voice_processing: 'Preparazione risposta...',
+        voice_speaking: 'Lettura risposta...',
+        voice_unsupported: 'Input vocale non supportato in questo browser.',
         suggestion_1: 'Qual è lo stato più recente dei progetti?',
         suggestion_2: 'Chi è in ritardo oggi?',
         suggestion_3: 'Quali sono gli orari di lavoro?',
@@ -754,6 +766,304 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // =========================================================================
+  // Component 3B: Voice Conversation (Low-latency Browser STT + TTS)
+  // =========================================================================
+  const VoiceConversation = {
+    recognition: null,
+    active: false,
+    listening: false,
+    speaking: false,
+    activeTextarea: null,
+    activeButton: null,
+    currentAudio: null,
+    currentAudioUrl: null,
+    restartTimer: null,
+
+    get SpeechRecognition() {
+      return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    },
+
+    getLangCode(lang = I18n.current) {
+      const langMap = { tr: 'tr-TR', en: 'en-US', it: 'it-IT' };
+      return langMap[lang] || langMap.tr;
+    },
+
+    isSupported() {
+      return !!this.SpeechRecognition && 'speechSynthesis' in window;
+    },
+
+    toggle(textarea, button) {
+      if (this.active && this.activeButton === button) {
+        this.stop();
+        return;
+      }
+
+      if (!this.isSupported()) {
+        this.showStatus(textarea, I18n.t('voice_unsupported'), true);
+        return;
+      }
+
+      this.stop();
+      this.active = true;
+      this.activeTextarea = textarea;
+      this.activeButton = button;
+      this.updateButtonState('listening');
+      this.startListening();
+    },
+
+    startListening() {
+      if (!this.active || State.isLoading || this.speaking || this.listening) return;
+
+      const Recognition = this.SpeechRecognition;
+      this.recognition = new Recognition();
+      this.recognition.lang = this.getLangCode();
+      this.recognition.continuous = false;
+      this.recognition.interimResults = true;
+      this.recognition.maxAlternatives = 1;
+      this.listening = true;
+      this.updateButtonState('listening');
+      this.showStatus(this.activeTextarea, I18n.t('voice_listening'));
+
+      let finalTranscript = '';
+      let lastInterim = '';
+
+      this.recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript.trim();
+          if (event.results[i].isFinal) {
+            finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+          } else {
+            interim += (interim ? ' ' : '') + transcript;
+          }
+        }
+
+        lastInterim = interim;
+        if (this.activeTextarea) {
+          this.activeTextarea.value = finalTranscript || lastInterim;
+          this.activeTextarea.dispatchEvent(new Event('input'));
+        }
+      };
+
+      this.recognition.onerror = () => {
+        this.listening = false;
+        this.updateButtonState(this.active ? 'idle' : null);
+      };
+
+      this.recognition.onend = () => {
+        this.listening = false;
+        if (!this.active) {
+          this.updateButtonState(null);
+          return;
+        }
+
+        const transcript = (finalTranscript || lastInterim || '').trim();
+        if (transcript && this.activeTextarea) {
+          this.activeTextarea.value = transcript;
+          this.activeTextarea.dispatchEvent(new Event('input'));
+          this.showStatus(this.activeTextarea, I18n.t('voice_processing'));
+          ChatInput.submitQuery(this.activeTextarea, { fromVoice: true });
+        } else if (!State.isLoading && !this.speaking) {
+          this.restartTimer = setTimeout(() => this.startListening(), 350);
+        }
+      };
+
+      try {
+        this.recognition.start();
+      } catch (err) {
+        this.listening = false;
+      }
+    },
+
+    stopListening() {
+      clearTimeout(this.restartTimer);
+      if (this.recognition) {
+        try { this.recognition.stop(); } catch (err) {}
+        this.recognition = null;
+      }
+      this.listening = false;
+    },
+
+    async speakAnswer(data) {
+      if (!this.active) return;
+
+      const answer = this.toSpeechText(data.answer || data.user_message || '');
+      if (!answer) {
+        this.resumeAfterAnswer();
+        return;
+      }
+
+      this.stopListening();
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+
+      const responseLang = data.response_language || I18n.current;
+      this.speaking = true;
+      this.updateButtonState('speaking');
+      this.showStatus(this.activeTextarea, I18n.t('voice_speaking'));
+
+      const customPlayed = await this.playCustomTts(answer, responseLang);
+      if (customPlayed) return;
+
+      if (!('speechSynthesis' in window)) {
+        this.speaking = false;
+        this.resumeAfterAnswer();
+        return;
+      }
+
+      const utterance = new SpeechSynthesisUtterance(answer);
+      utterance.lang = this.getLangCode(responseLang);
+      utterance.rate = responseLang === 'it' ? 0.98 : 1.02;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+
+      const voice = this.pickVoice(utterance.lang);
+      if (voice) utterance.voice = voice;
+
+      utterance.onstart = () => {
+        this.speaking = true;
+        this.updateButtonState('speaking');
+        this.showStatus(this.activeTextarea, I18n.t('voice_speaking'));
+      };
+
+      utterance.onend = () => {
+        this.speaking = false;
+        this.resumeAfterAnswer();
+      };
+
+      utterance.onerror = () => {
+        this.speaking = false;
+        this.resumeAfterAnswer();
+      };
+
+      window.speechSynthesis.speak(utterance);
+    },
+
+    async playCustomTts(text, lang) {
+      try {
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, lang })
+        });
+
+        if (!response.ok || !(response.headers.get('Content-Type') || '').includes('audio/')) {
+          return false;
+        }
+
+        const blob = await response.blob();
+        this.releaseAudioUrl();
+        this.currentAudioUrl = URL.createObjectURL(blob);
+        const audio = new Audio(this.currentAudioUrl);
+        this.currentAudio = audio;
+
+        audio.onended = () => {
+          this.speaking = false;
+          this.releaseAudioUrl();
+          this.resumeAfterAnswer();
+        };
+
+        audio.onerror = () => {
+          this.speaking = false;
+          this.releaseAudioUrl();
+          this.resumeAfterAnswer();
+        };
+
+        await audio.play();
+        return true;
+      } catch (err) {
+        this.releaseAudioUrl();
+        return false;
+      }
+    },
+
+    releaseAudioUrl() {
+      if (this.currentAudio) {
+        try {
+          this.currentAudio.pause();
+          this.currentAudio.src = '';
+        } catch (err) {}
+        this.currentAudio = null;
+      }
+      if (this.currentAudioUrl) {
+        URL.revokeObjectURL(this.currentAudioUrl);
+        this.currentAudioUrl = null;
+      }
+    },
+
+    pickVoice(langCode) {
+      const voices = window.speechSynthesis.getVoices() || [];
+      const exact = voices.find(v => v.lang && v.lang.toLowerCase() === langCode.toLowerCase());
+      if (exact) return exact;
+      const prefix = langCode.split('-')[0].toLowerCase();
+      return voices.find(v => v.lang && v.lang.toLowerCase().startsWith(prefix)) || null;
+    },
+
+    resumeAfterAnswer() {
+      if (!this.active) return;
+      this.updateButtonState('listening');
+      this.restartTimer = setTimeout(() => this.startListening(), 450);
+    },
+
+    stop() {
+      this.active = false;
+      this.stopListening();
+      this.releaseAudioUrl();
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      this.speaking = false;
+      this.showStatus(this.activeTextarea, '');
+      this.updateButtonState(null);
+      this.activeTextarea = null;
+      this.activeButton = null;
+    },
+
+    updateButtonState(state) {
+      const buttons = [DOM.heroVoiceBtn, DOM.bottomVoiceBtn].filter(Boolean);
+      buttons.forEach(btn => {
+        btn.classList.remove('voice-active', 'voice-listening', 'voice-speaking');
+        btn.setAttribute('aria-pressed', 'false');
+      });
+
+      if (!this.activeButton || !state) return;
+
+      this.activeButton.classList.add('voice-active');
+      this.activeButton.setAttribute('aria-pressed', 'true');
+      if (state === 'listening') this.activeButton.classList.add('voice-listening');
+      if (state === 'speaking') this.activeButton.classList.add('voice-speaking');
+    },
+
+    showStatus(textarea, text, isError = false) {
+      if (!textarea) return;
+      const form = textarea.closest('.composer');
+      if (!form) return;
+      let status = form.querySelector('.voice-status');
+      if (!status) {
+        status = document.createElement('span');
+        status.className = 'voice-status';
+        form.appendChild(status);
+      }
+      status.textContent = text || '';
+      status.classList.toggle('error', !!isError);
+      status.style.display = text ? 'inline-flex' : 'none';
+    },
+
+    toSpeechText(markdown) {
+      return String(markdown || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+        .replace(/[#>*_~|]/g, ' ')
+        .replace(/\n{2,}/g, '. ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 1800);
+    }
+  };
+
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
+
+  // =========================================================================
   // Component 4: ChatInput (Auto-Grow, Send, Attachments, Voice)
   // =========================================================================
   const ChatInput = {
@@ -805,40 +1115,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
 
-      // Voice dictation button (Web Speech API with graceful fallback)
+      // Voice conversation button (STT + TTS loop with graceful fallback)
       if (voiceBtn) {
         voiceBtn.addEventListener('click', () => {
-          if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition();
-            const langMap = { tr: 'tr-TR', en: 'en-US', it: 'it-IT' };
-            recognition.lang = langMap[I18n.current] || 'tr-TR';
-            recognition.interimResults = false;
-            voiceBtn.style.color = '#ef4444';
-            recognition.onresult = (event) => {
-              const transcript = event.results[0][0].transcript;
-              textarea.value = transcript;
-              voiceBtn.style.color = '';
-              this.submitQuery(textarea);
-            };
-            recognition.onerror = () => {
-              voiceBtn.style.color = '';
-            };
-            recognition.onend = () => {
-              voiceBtn.style.color = '';
-            };
-            recognition.start();
-          } else {
-            textarea.placeholder = I18n.t('voice') + ' error...';
-            setTimeout(() => {
-              textarea.placeholder = I18n.t('hero_placeholder');
-            }, 3000);
-          }
+          VoiceConversation.toggle(textarea, voiceBtn);
         });
       }
     },
 
-    async submitQuery(textarea) {
+    async submitQuery(textarea, options = {}) {
       const text = textarea.value.trim();
       if (!text || State.isLoading) return;
 
@@ -846,10 +1131,10 @@ document.addEventListener('DOMContentLoaded', () => {
       textarea.style.height = 'auto';
 
       ConversationStream.appendUserMessage(text);
-      await this.executeChatRequest(text);
+      await this.executeChatRequest(text, options);
     },
 
-    async executeChatRequest(text) {
+    async executeChatRequest(text, options = {}) {
       State.isLoading = true;
       this.setInputsDisabled(true);
       DOM.streamLoadingBar.style.display = 'flex';
@@ -871,12 +1156,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const data = await response.json();
         ConversationStream.appendAssistantMessage(data);
+        if (options.fromVoice) VoiceConversation.speakAnswer(data);
       } catch (err) {
-        ConversationStream.appendAssistantMessage({
+        const errorData = {
           status: 'ERROR',
           intent: 'UNKNOWN',
           user_message: 'Sunucuya bağlanırken bir hata oluştu. Lütfen yerel servislerin aktif olduğunu kontrol edin.'
-        });
+        };
+        ConversationStream.appendAssistantMessage(errorData);
+        if (options.fromVoice) VoiceConversation.speakAnswer(errorData);
       } finally {
         clearTimeout(stepTimer1);
         clearTimeout(stepTimer2);

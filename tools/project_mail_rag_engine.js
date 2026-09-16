@@ -195,7 +195,8 @@ async function answerLatestMailDirect(params) {
   const mailCount = Math.min(20, Math.max(1, Number(params.mail_count) || 1));
   const mailIndex = Math.min(20, Math.max(1, Number(params.mail_index) || 0));
   const dateScope = params.date_scope || null;
-  const dateInfo = (!params.target_date && params.question) ? parseMultilingualDateRange(params.question, lang) : null;
+  const shouldInferDateFromQuestion = !params.target_date && params.question && !['LATEST_MAIL', 'MAIL_ARCHIVE', 'MAIL_BY_SENDER'].includes(params.query_mode);
+  const dateInfo = shouldInferDateFromQuestion ? parseMultilingualDateRange(params.question, lang) : null;
   const targetDate = params.target_date || (dateInfo?.dateFrom) || (dateScope && /^\d{4}-\d{2}-\d{2}$/.test(dateScope) ? dateScope : null);
   const queryMode = params.query_mode || (targetDate ? 'SPECIFIC_DATE' : 'LATEST_MAIL');
   const summarizeOnly = params.summarize_only === true || queryMode === 'MAIL_INDEX' || queryMode === 'MAIL_SUMMARY';
