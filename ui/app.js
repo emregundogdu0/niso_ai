@@ -578,10 +578,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const row = document.createElement('div');
       row.className = 'msg-row assistant-msg';
 
-      let routeClass = 'hr';
-      let routeKey = 'route_hr';
+      let routeClass = 'unknown';
+      let routeKey = 'route_unknown';
 
-      if (data.intent === 'SMALL_TALK') {
+      if (data.status === 'ERROR' || data.intent === 'SYSTEM_ERROR' || data.intent === 'RATE_LIMIT') {
+        routeClass = 'error';
+        routeKey = 'route_error';
+      } else if (data.intent === 'HR_POLICY') {
+        routeClass = 'hr';
+        routeKey = 'route_hr';
+      } else if (data.intent === 'SMALL_TALK' || data.intent === 'GENERAL_CHAT') {
         routeClass = 'smalltalk';
         routeKey = 'route_smalltalk';
       } else if (data.intent === 'HELP') {
@@ -605,15 +611,12 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (data.intent === 'HYBRID') {
         routeClass = 'hybrid';
         routeKey = 'route_hybrid';
-      } else if (data.status === 'ERROR') {
-        routeClass = 'error';
-        routeKey = 'route_error';
       }
 
       const routeLabel = I18n.t(routeKey) || data.title || 'Bilgi';
       const contentHtml = parseMarkdown(data.answer || data.user_message || 'Yanıt alınamadı.');
       const auditId = data.audit_id || data.request_id || ('req_' + Date.now().toString(36));
-      const isSmallOrHelp = ['SMALL_TALK', 'HELP', 'UNKNOWN', 'SECURITY_REJECTED'].includes(data.intent);
+      const isSmallOrHelp = ['SMALL_TALK', 'GENERAL_CHAT', 'HELP', 'UNKNOWN', 'SECURITY_REJECTED'].includes(data.intent);
 
       // Synthetic / Live Test Notice
       let noticeHtml = '';

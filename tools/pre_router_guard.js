@@ -56,6 +56,12 @@ function detectLanguageDeterministic(text) {
   if (norm.includes('come stai') || norm.includes('orari di lavoro') || norm.includes('chi e arrivato') || norm.includes('ultimo stato') || norm.includes('dammi una') || norm.includes('qual e') || norm.includes('elimina il database') || norm.includes('riassumi l ultima')) itScore += 8;
   if (norm.includes('nasilsin') || norm.includes('calisma saatleri') || norm.includes('kimler gec kaldi') || norm.includes('son durum') || norm.includes('bana kek') || norm.includes('veritabanini sil') || norm.includes('son gelen maili')) trScore += 8;
 
+  // Mixed-language HR queries (e.g. "dress code nedir şirkette") should stay Turkish.
+  const trCue = ['nedir', 'var mi', 'nasil', 'hakkinda', 'sirket', 'sirkette', 'ofiste', 'kiyafet', 'izin'].some(t => norm.includes(t));
+  if (trCue && (norm.includes('dress') || norm.includes('dresscode') || norm.includes('code'))) {
+    trScore += 10;
+  }
+
   if (enScore > trScore && enScore > itScore) {
     return { lang: 'en', confidence: Math.min(0.99, 0.75 + enScore * 0.05) };
   }
@@ -583,11 +589,14 @@ function preRouteGuard(message, sessionLanguage = 'tr') {
   // 9. HR Policy in TR, EN, IT
   const hrKeywords = [
     // TR
-    'calisma saatleri', 'calisma saati', 'mesai saatleri', 'dogum izni', 'yillik izin', 'kiyafet', 'dress code',
+    'calisma saatleri', 'calisma saati', 'mesai saatleri', 'dogum izni', 'yillik izin',
+    'kiyafet', 'kiyafet kurali', 'kiyafet standardi', 'ofis kiyafet', 'giyinme', 'giyim kurali',
+    'dress code', 'dresscode', 'dress-code',
     // EN
-    'working hours', 'work hours', 'office hours', 'maternity leave', 'annual leave', 'dress code', 'vacation',
+    'working hours', 'work hours', 'office hours', 'maternity leave', 'annual leave', 'dress code', 'dresscode', 'vacation',
     // IT
-    'orari di lavoro', 'orario di lavoro', 'congedo di maternita', 'maternita', 'ferie annuali', 'giorni di ferie', 'codice di abbigliamento'
+    'orari di lavoro', 'orario di lavoro', 'congedo di maternita', 'maternita', 'ferie annuali', 'giorni di ferie',
+    'codice di abbigliamento', 'abbigliamento'
   ];
   const hasHr = hrKeywords.some(k => norm.includes(k));
 

@@ -149,7 +149,7 @@ for (const g of greetings) {
 }
 
 const attendanceKeywords = ['gec kaldi', 'gec kalan', 'mesaide', 'ise geldi', 'zamaninda gelen', 'izinli', 'uzaktan calisan', 'kac kisi', 'puantaj', 'gecikme'];
-const hrKeywords = ['calisma saatleri', 'calisma saati', 'dress code', 'kiyafet', 'dogum izni', 'yillik izin', 'yemek yardim', 'yol yardim', 'deneme suresi', 'prim politikasi', 'resmi tatiller'];
+const hrKeywords = ['calisma saatleri', 'calisma saati', 'dress code', 'dresscode', 'dress-code', 'kiyafet', 'kiyafet kurali', 'dogum izni', 'yillik izin', 'yemek yardim', 'yol yardim', 'deneme suresi', 'prim politikasi', 'resmi tatiller'];
 const projectKeywords = ['temsa', 'vortex', 'eldor obc', 'smart factory', 'bms', 'ecu', 'proje e posta', 'proje guncelleme', 'proje'];
 const companyKeywords = ['niso ne is yapar', 'sirket hangi hizmetleri', 'fabrikanin adresi', 'faaliyet alanlari'];
 
