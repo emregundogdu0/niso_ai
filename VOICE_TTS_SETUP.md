@@ -7,13 +7,15 @@ The UI now supports two voice output paths:
 
 ## Reference Audio
 
-The selected reference sample was copied to:
+Place your local reference sample at:
 
 `ui/voice/nazli-reference.mp3`
 
-This file is available from the running app at:
+This file is gitignored (personal audio should not be committed). When present locally, the running app can serve it at:
 
 `/voice/nazli-reference.mp3`
+
+Browser TTS cannot clone this sample. Custom voice cloning still requires a configured TTS provider (e.g. ElevenLabs voice id).
 
 ## Required Environment Variables
 

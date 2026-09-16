@@ -2,7 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const PROJECT_ID = 'DGu4CJhdcNhB2Rjx';
+const PROJECT_ID = process.env.N8N_PROJECT_ID || '';
+const READER_PASSWORD = process.env.CHATBOT_READER_PASSWORD || '';
+
+if (!PROJECT_ID || !READER_PASSWORD) {
+  console.error('Set N8N_PROJECT_ID and CHATBOT_READER_PASSWORD env vars before running this script.');
+  process.exit(1);
+}
 
 const cred = [
   {
@@ -13,7 +19,7 @@ const cred = [
       host: 'management-postgres',
       database: 'management_ai',
       user: 'chatbot_reader',
-      password: 'REDACTED_PASSWORD',
+      password: READER_PASSWORD,
       port: 5432,
       ssl: 'disable'
     }

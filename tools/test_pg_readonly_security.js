@@ -1,12 +1,17 @@
 const { Client } = require('pg');
 
 async function testPostgresReadOnly() {
+  if (!process.env.CHATBOT_READER_PASSWORD) {
+    console.error('Set CHATBOT_READER_PASSWORD env var before running this script.');
+    process.exit(1);
+  }
+
   const client = new Client({
     host: 'localhost',
     port: 5432,
     database: 'management_ai',
     user: 'chatbot_reader',
-    password: 'REDACTED_PASSWORD'
+    password: process.env.CHATBOT_READER_PASSWORD
   });
 
   await client.connect();
